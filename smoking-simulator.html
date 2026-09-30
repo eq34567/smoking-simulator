@@ -48,7 +48,7 @@
     font-family: var(--ui-font); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent;
   }
   #sceneWrap { position: fixed; inset: 0; background: #000; touch-action: none; }
-  #c { width: 100%; height: 100%; display: block; cursor: pointer; }
+  #c { width: 100%; height: 100%; display: block; cursor: grab; }
 
   .brand {
     position: fixed; left: 16px; top: 14px; z-index: 30; pointer-events: none;
@@ -61,6 +61,7 @@
     position: absolute; transform: translate(-50%, -100%); pointer-events: none; white-space: nowrap;
     font-size: 11px; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.88); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75);
   }
+  .flabel.hint { transform: translate(0, -100%); opacity: 0; transition: opacity 0.15s; font-size: 12px; }
   .flabel::before {
     content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%;
     background: currentColor; vertical-align: 1px; opacity: 0.85;
@@ -143,8 +144,9 @@
   <div id="hurt"></div>
   <div class="flabel" id="labelPack">还剩 20 支</div>
   <div class="flabel" id="labelTray">烟灰缸</div>
+  <div class="flabel hint" id="labelHover"></div>
   <div id="bubble"></div>
-  <div id="status">拖动画面可以转头</div>
+  <div id="status">点桌上的东西就能用 · 拖动画面转头</div>
   <div id="dreamLine"></div>
 </main>
 
@@ -166,10 +168,12 @@
   <span class="rule"></span>
   <button class="act on" id="btnSound">声音 开</button>
   <button class="act" id="btnStyle">梦核</button>
+  <span class="rule"></span>
+  <button class="act" id="btnGirlOn">女孩 关</button>
   <span id="girlCtrl"><button class="act" id="btnGirl">递她一支烟</button></span>
 </nav>
 
-<footer class="meta"><div id="statsLine">今天已经抽了 0 支 · 一共吸了 0 口</div><div class="keys">按住空格吸 · E 抽烟/点火 · F 弹烟灰 · X 摁灭 · B 槟榔 · P 手机 · O 开窗</div></footer>
+<footer class="meta"><div id="statsLine">今天已经抽了 0 支 · 一共吸了 0 口</div><div class="keys">点桌上的烟盒、火机、槟榔、手机也能操作 · 按住空格吸 · E 抽烟/点火 · F 弹烟灰 · X 摁灭 · B 槟榔 · P 手机 · O 开窗 · G 女孩</div></footer>
 
 <div id="panel"></div>
 <div id="loader" role="status" aria-live="polite"><div class="ring"></div><p>Loading…</p></div>
@@ -463,7 +467,8 @@ function photoTex(name, srgb, rx, ry) {
   var X_AXIS = new V3(1, 0, 0), Y_AXIS = new V3(0, 1, 0);
 
   // ======================= constants =======================
-  var GIRL_ENABLED = false;   // she's parked for now — flip to true to bring her back
+  var girlOn = false;         // she sits across the bar when switched on (the 女孩 button; remembered per browser)
+  try { girlOn = localStorage.getItem("smokesim-girl") === "1"; } catch (e) {}
   var PACK_SIZE = 20;
   var FILTER_LEN = 0.25, BODY_MAX = 0.6, EMBER_LEN = 0.03;
   var PUFF_BURN = 0.055, IDLE_BURN = 0.0009, ASH_RATIO = 0.9;   // ~5 mm per 2 s puff; ~5 mm/min idle (units: 1 = 10 cm)
@@ -887,32 +892,10 @@ function photoTex(name, srgb, rx, ry) {
     lampGroup.add(diff);
   })();
 
-  // light shaft under the lamp: a soft cone thickest where you look through most of it, brightest near the shade,
-  // with slow drifting dust motes that sparkle only while they are inside the beam
+  // under the lamp: slow drifting dust motes that sparkle only while they are inside its light. (There used to be a
+  // glowing cone for the shaft too, but seen from the stool it sat right in the middle of the view as a pale patch.)
   var beamMats = [];
   (function () {
-    var top = 6.55, r0 = 0.42, r1 = 3.3, H = top - 0.02;
-    var mat = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
-      uniforms: { uTime: { value: 0 }, col: { value: LOFI ? new THREE.Color(1.0, 0.66, 0.72) : new THREE.Color(1.0, 0.72, 0.45) }, k: { value: LOFI ? 0.075 : 0.04 } },
-      vertexShader: "varying vec3 vN; varying vec3 vV; varying float vY; varying vec3 vW; void main(){ vY = uv.y; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mv = viewMatrix * w; vV = -mv.xyz; vN = normalMatrix * normal; gl_Position = projectionMatrix * mv; }",
-      fragmentShader: [
-        "varying vec3 vN; varying vec3 vV; varying float vY; varying vec3 vW; uniform float uTime; uniform vec3 col; uniform float k;",
-        "float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }",
-        "void main(){",
-        "  float facing = pow(clamp(abs(dot(normalize(vN), normalize(vV))), 0.0, 1.0), 2.0);",
-        "  float y = clamp(vY, 0.0, 1.0);",                    // pow() of a tiny negative is NaN
-        "  float fall = mix(0.2, 1.0, pow(y, 1.5)) * smoothstep(0.0, 0.06, y);",
-        "  float swirl = 0.8 + 0.2 * sin(vW.y * 2.3 + uTime * 0.25 + sin(vW.x * 1.7 + uTime * 0.17) * 2.0);",
-        "  gl_FragColor = vec4(col * k * facing * fall * swirl, 1.0);",
-        "}"].join("\n")
-    });
-    var cone = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, H, 64, 1, true), mat);
-    cone.position.set(0.3, top - H / 2, 0.2);
-    cone.userData.top = top; cone.userData.H = H;
-    scene.add(cone);
-    beamCone = cone;
-    beamMats.push(mat);
     var n = 220, pos = new Float32Array(n * 3), ph = new Float32Array(n);
     for (var i = 0; i < n; i++) {
       var y = rand(0.3, 6.0), rr = Math.sqrt(Math.random()) * 3.2, a = rand(0, 6.28);
@@ -1138,7 +1121,7 @@ function photoTex(name, srgb, rx, ry) {
     neonPink: new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff4fa3).multiplyScalar(1.5) }),
     neonCyan: new THREE.MeshBasicMaterial({ color: new THREE.Color(0x35e6ff).multiplyScalar(1.5) }),
     // her — deliberately cel-shaded against the photoreal room
-    gSkin: new THREE.MeshToonMaterial({ color: 0xf0cdb8 }),
+    gSkin: new THREE.MeshToonMaterial({ color: 0xc8957e }),              // darker than it looks: the lamp is right in front of her
     gHair: new THREE.MeshToonMaterial({ color: 0x1d1230, side: THREE.DoubleSide }),
     gHairTip: new THREE.MeshToonMaterial({ color: 0xff6fb5, emissive: 0xff2f90, emissiveIntensity: 0.25 }),
     gJacket: new THREE.MeshToonMaterial({ color: 0x1b1e2b }),
@@ -2505,6 +2488,9 @@ function photoTex(name, srgb, rx, ry) {
     button.position.set(0.3, -0.13, 0); lighter.add(button);
   })();
   var flameAnchor = new THREE.Object3D(); flameAnchor.position.set(0.4, -0.02, 0); lighter.add(flameAnchor);
+  // a larger box that is never drawn, so the little lighter is easy to click
+  var lighterHit = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.4), new THREE.MeshBasicMaterial({ visible: false }));
+  lighterHit.position.x = 0.06; lighter.add(lighterHit);
   var flameBlueTex = canvasTex(64, 64, function (g) {
     var gr = g.createRadialGradient(32, 40, 2, 32, 36, 26);
     gr.addColorStop(0, "rgba(120,170,255,0.9)"); gr.addColorStop(0.5, "rgba(60,110,255,0.45)"); gr.addColorStop(1, "rgba(40,80,255,0)");
@@ -3564,18 +3550,28 @@ function photoTex(name, srgb, rx, ry) {
     baseExpr: "normal", tempExpr: null, tempUntil: 0, blinkAt: 2.5, blinkUntil: 0,
     nextPuff: 0, face: {}, pose: null
   };
-  girl.root.position.set(0, 0, -4.9);
+  girl.root.position.set(0, 0, -4.1);                                      // just past the far edge of the bar (z -3)
   girl.root.userData.pick = "girl";
   scene.add(girl.root);
   var gPivot = new THREE.Group(); gPivot.position.set(0, -0.5, 0); girl.root.add(gPivot);
   var gTorso = new THREE.Group(); gTorso.position.set(0, -0.1, 0); gPivot.add(gTorso);
   (function () {
-    var body = mesh(new THREE.CylinderGeometry(0.95, 0.62, 3.8, 24), M.gJacket);
-    body.position.y = 0.7; body.scale.z = 0.68; gTorso.add(body); outline(body, 1.03);
+    // an oversized hoodie: a turned profile (waist, ribs, full chest, sloping shoulders) flattened front to back
+    var prof = [[0.001, -1.3], [0.6, -1.3], [0.64, -0.6], [0.62, 0.1], [0.7, 0.7], [0.84, 1.3], [0.9, 1.8], [0.88, 2.15], [0.74, 2.45], [0.5, 2.62], [0.36, 2.7], [0.001, 2.7]]
+      .map(function (p) { return new THREE.Vector2(p[0], p[1]); });
+    var body = mesh(new THREE.LatheGeometry(prof, 32), M.gJacket);
+    body.scale.set(1.12, 1, 0.66); gTorso.add(body); outline(body, 1.03);
     [-1, 1].forEach(function (s) {
-      var sh = mesh(new THREE.SphereGeometry(0.36, 16, 12), M.gJacket); sh.position.set(1.0 * s, 2.36, 0); sh.scale.set(1, 0.75, 0.9); gTorso.add(sh); outline(sh, 1.06);
-      var stripe = mesh(new THREE.BoxGeometry(0.36, 0.03, 0.05), M.gGlowCyan, false); stripe.position.set(1.0 * s, 2.63, 0.02); gTorso.add(stripe);
+      var sh = mesh(new THREE.SphereGeometry(0.3, 16, 12), M.gJacket); sh.position.set(0.9 * s, 2.26, 0); sh.scale.set(1, 0.72, 0.95); gTorso.add(sh); outline(sh, 1.06);
+      var stripe = mesh(new THREE.BoxGeometry(0.36, 0.03, 0.05), M.gGlowCyan, false); stripe.position.set(0.9 * s, 2.48, 0.02); gTorso.add(stripe);
+      // drawstrings hanging from the neckline, with little glowing tips
+      var cord = mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.75, 6), M.gBlack, false);
+      cord.position.set(0.17 * s, 2.25, 0.6); cord.rotation.set(-0.12, 0, 0.05 * s); gTorso.add(cord);
+      var tip = mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.09, 8), M.gGlowPink, false); tip.position.set(0.19 * s, 1.85, 0.64); gTorso.add(tip);
     });
+    // the hood, bunched up behind the neck
+    var hood = mesh(new THREE.SphereGeometry(0.5, 20, 14), M.gJacket); hood.position.set(0, 2.45, -0.5); hood.scale.set(1.0, 0.5, 0.45); gTorso.add(hood); outline(hood, 1.05);
+    var hoodRim = mesh(new THREE.TorusGeometry(0.44, 0.065, 10, 28, Math.PI * 1.3), M.gJacket); hoodRim.rotation.set(Math.PI / 2 + 0.25, 0, Math.PI * 0.85); hoodRim.position.set(0, 2.66, -0.05); gTorso.add(hoodRim); outline(hoodRim, 1.06);   // arc open at the front
     var col = mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.35, 20), M.gJacket); col.position.y = 2.72; gTorso.add(col);
     var ring = mesh(new THREE.TorusGeometry(0.41, 0.022, 8, 28), M.gGlowCyan, false); ring.rotation.x = Math.PI / 2; ring.position.y = 2.89; gTorso.add(ring);
     var neck = mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.5, 14), M.gSkin); neck.position.y = 3.0; gTorso.add(neck);
@@ -3583,7 +3579,7 @@ function photoTex(name, srgb, rx, ry) {
     var gem = mesh(new THREE.SphereGeometry(0.035, 8, 6), M.gGlowPink, false); gem.position.set(0, 3.03, 0.22); gTorso.add(gem);
   })();
   var gHead = new THREE.Group(); gHead.position.set(0, 3.72, 0.05); gTorso.add(gHead);
-  var HEAD_K = 1.18;
+  var HEAD_K = 1.05;
   var gHeadS = new THREE.Group(); gHeadS.scale.setScalar(HEAD_K); gHeadS.position.y = 0.12; gHead.add(gHeadS);
   var HEAD_SCALE = new V3(0.95, 1.04, 0.92);
   var gHeadShape = new THREE.Group(); gHeadShape.scale.copy(HEAD_SCALE); gHeadS.add(gHeadShape);
@@ -3692,7 +3688,7 @@ function photoTex(name, srgb, rx, ry) {
   ["normal", "blink", "happy", "plead", "puff", "wink"].forEach(function (e) {
     girl.face[e] = canvasTex(512, 512, function (g) { drawFace(g, e); });
   });
-  var faceMat = new THREE.MeshToonMaterial({ map: girl.face.normal, gradientMap: toonGrad, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  var faceMat = new THREE.MeshToonMaterial({ map: girl.face.normal, color: new THREE.Color(0.82, 0.82, 0.82), gradientMap: toonGrad, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   var faceMesh = new THREE.Mesh(new THREE.SphereGeometry(0.853, 32, 20, Math.PI / 2 - 0.9, 1.8, 0.9, 1.4), faceMat);
   gHeadShape.add(faceMesh);
 
@@ -3700,7 +3696,20 @@ function photoTex(name, srgb, rx, ry) {
   (function () {
     var cap = mesh(new THREE.SphereGeometry(0.9, 32, 16, 0, Math.PI * 2, 0, 1.28), M.gHair); cap.scale.copy(HEAD_SCALE); gHeadS.add(cap); outline(cap, 1.035);
     var back = mesh(new THREE.SphereGeometry(0.93, 32, 20, Math.PI / 2 + 1.0, Math.PI * 2 - 2.0, 0, 2.35), M.gHair); back.scale.copy(HEAD_SCALE); gHeadS.add(back);
-    var backLong = mesh(new THREE.BoxGeometry(1.7, 1.5, 0.35), M.gHair); backLong.position.set(0, -1.05, -0.45); gHeadS.add(backLong);
+    // long hair down the back: an open curved sheet round the back of the head, flaring over the shoulders,
+    // its lower edge cut into points like drawn strands
+    var hg = new THREE.CylinderGeometry(0.86, 1.02, 1.9, 40, 6, true, Math.PI / 2 + 0.2, Math.PI - 0.4);   // theta 0 = her front
+    var hp = hg.attributes.position, hv = new V3();
+    for (var hi = 0; hi < hp.count; hi++) {
+      hv.set(hp.getX(hi), hp.getY(hi), hp.getZ(hi));
+      var down = (0.95 - hv.y) / 1.9;                                         // 0 at the crown line, 1 at the tips
+      var ang = Math.atan2(hv.x, hv.z);
+      if (down > 0.99) hv.y -= 0.22 * Math.abs(Math.sin(ang * 5.5));        // pointed tips
+      hv.x *= HEAD_SCALE.x; hv.z *= HEAD_SCALE.z * (1 - 0.12 * down);        // lies closer to the back lower down
+      hp.setXYZ(hi, hv.x, hv.y, hv.z);
+    }
+    hg.computeVertexNormals();
+    var backLong = mesh(hg, M.gHair); backLong.position.set(0, -0.95, -0.02); gHeadS.add(backLong); outline(backLong, 1.02);
     for (var i = -3; i <= 3; i++) {
       var phi = Math.PI / 2 + i * 0.26, th = 1.12, r = 0.9;
       var n = new V3(-Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th));
@@ -3721,44 +3730,61 @@ function photoTex(name, srgb, rx, ry) {
   })();
 
   // arms (drawn between shoulder, elbow and hand each frame)
-  var unitCyl = new THREE.CylinderGeometry(1, 1, 1, 14);
-  function makeArm() {
+  // sleeves taper from the shoulder to a loose cuff; the unit segments are stretched to length each frame
+  var upperGeo = new THREE.CylinderGeometry(0.165, 0.2, 1, 14), foreGeo = new THREE.CylinderGeometry(0.14, 0.165, 1, 14);
+  function makeHand(side) {                                                 // local: +y along the fingers, +z the back of the hand
+    var g = new THREE.Group(), ts = side === "R" ? -1 : 1;                 // thumb towards her middle
+    var palm = mesh(new THREE.SphereGeometry(0.12, 14, 10), M.gSkin); palm.scale.set(0.95, 1.05, 0.5); palm.position.y = 0.07; g.add(palm); outline(palm, 1.08);
+    for (var i = 0; i < 4; i++) {
+      var f = new THREE.Group(); f.position.set((i - 1.5) * 0.052 * -ts, 0.17 - Math.abs(i - 1.2) * 0.012, 0); f.rotation.x = -0.45 - i * 0.06;
+      var fm = mesh(new THREE.CapsuleGeometry(0.029, 0.09 - Math.abs(i - 1.3) * 0.015, 4, 8), M.gSkin); fm.position.y = 0.06; f.add(fm); outline(fm, 1.1);
+      g.add(f);
+    }
+    var th = new THREE.Group(); th.position.set(ts * 0.085, 0.03, -0.02); th.rotation.set(-0.35, 0, -ts * 0.75);
+    var tm = mesh(new THREE.CapsuleGeometry(0.032, 0.08, 4, 8), M.gSkin); tm.position.y = 0.06; th.add(tm); outline(tm, 1.1);
+    g.add(th);
+    return g;
+  }
+  function makeArm(side) {
     var a = {
-      upper: mesh(unitCyl, M.gJacket), fore: mesh(unitCyl, M.gJacket),
-      elbow: mesh(new THREE.SphereGeometry(0.19, 12, 10), M.gJacket),
-      cuff: mesh(new THREE.TorusGeometry(0.16, 0.02, 6, 18), M.gGlowCyan, false),
-      hand: mesh(new THREE.SphereGeometry(0.16, 14, 10), M.gSkin),
-      thumb: mesh(new THREE.SphereGeometry(0.07, 10, 8), M.gSkin),
+      upper: mesh(upperGeo, M.gJacket), fore: mesh(foreGeo, M.gJacket),
+      elbow: mesh(new THREE.SphereGeometry(0.165, 12, 10), M.gJacket),
+      cuff: mesh(new THREE.TorusGeometry(0.14, 0.022, 6, 18), M.gGlowCyan, false),
+      hand: makeHand(side),
       anchor: new THREE.Object3D()
     };
-    a.hand.scale.set(0.9, 1.25, 0.65);
-    [a.upper, a.fore, a.elbow, a.cuff, a.hand, a.thumb].forEach(function (m) { m.userData.pick = "girl"; scene.add(m); });
-    [a.upper, a.fore].forEach(function (m) { outline(m, 1.12).scale.set(1.12, 1.0, 1.12); });
-    outline(a.elbow, 1.09); outline(a.hand, 1.07);
+    a.parts = [a.upper, a.fore, a.elbow, a.cuff, a.hand];
+    a.parts.forEach(function (m) { m.userData.pick = "girl"; scene.add(m); });
+    [a.upper, a.fore].forEach(function (m) { outline(m, 1.1).scale.set(1.1, 1.0, 1.1); });
+    outline(a.elbow, 1.09);
     scene.add(a.anchor);
     return a;
   }
-  var armR = makeArm(), armL = makeArm();
-  function setSeg(m, a, b, r) {
+  var armR = makeArm("R"), armL = makeArm("L");
+  function setSeg(m, a, b) {
     var d = b.clone().sub(a), len = d.length();
     m.position.copy(a).add(b).multiplyScalar(0.5);
     m.quaternion.setFromUnitVectors(Y_AXIS, d.normalize());
-    m.scale.set(r, len, r);
+    m.scale.set(1, len, 1);
   }
-  var SHOULDER = { R: new V3(-1.05, 2.3, 0), L: new V3(1.05, 2.3, 0) };
+  var SHOULDER = { R: new V3(-0.92, 2.22, 0), L: new V3(0.92, 2.22, 0) };
+  var _hx = new V3(), _hz = new V3(), _hm = new THREE.Matrix4();
   function updateArm(arm, side, P) {
     var S = gTorso.localToWorld(SHOULDER[side].clone());
     var E = girl.root.localToWorld(P["e" + side].clone());
     var H = girl.root.localToWorld(P["h" + side].clone());
-    setSeg(arm.upper, S, E, 0.19);
-    setSeg(arm.fore, E, H, 0.16);
+    setSeg(arm.upper, S, E);
+    setSeg(arm.fore, E, H);
     arm.elbow.position.copy(E);
     var fd = H.clone().sub(E).normalize();
-    arm.cuff.position.copy(H).sub(fd.clone().multiplyScalar(0.14));
+    arm.cuff.position.copy(H).sub(fd.clone().multiplyScalar(0.06));
     arm.cuff.quaternion.setFromUnitVectors(new V3(0, 0, 1), fd);
-    arm.hand.position.copy(H).add(fd.clone().multiplyScalar(0.08));
-    arm.hand.quaternion.setFromUnitVectors(Y_AXIS, fd);
-    arm.thumb.position.copy(H).add(new V3(side === "R" ? 0.12 : -0.12, 0.04, 0.06));
+    // the hand carries on from the forearm, back of the hand up (or towards us when the forearm points up)
+    _hz.set(0, 1, 0).addScaledVector(fd, -fd.y);
+    if (_hz.lengthSq() < 0.04) _hz.set(0, 0, 1).addScaledVector(fd, -fd.z);
+    _hz.normalize(); _hx.crossVectors(fd, _hz);
+    arm.hand.quaternion.setFromRotationMatrix(_hm.makeBasis(_hx, fd, _hz));
+    arm.hand.position.copy(H).addScaledVector(fd, -0.02);
     arm.anchor.position.copy(H);
   }
 
@@ -3769,9 +3795,12 @@ function photoTex(name, srgb, rx, ry) {
     };
   }
   var POSE = {
-    rest: GP({ lean: 0.02, tilt: 0.1, nod: 0.05, hR: new V3(-0.45, 0.22, 1.55), eR: new V3(-1.3, 0.2, 0.95), hL: new V3(0.45, 0.22, 1.55), eL: new V3(1.3, 0.2, 0.95) }),
+    // forearms on the bar, hands resting palm down a few cm in from its edge (the edge is at z 1.1 here, the top at y 0)
+    rest: GP({ lean: 0.1, tilt: 0.1, nod: 0.05, hR: new V3(-0.42, 0.11, 1.8), eR: new V3(-1.05, 0.2, 0.8), hL: new V3(0.42, 0.11, 1.8), eL: new V3(1.05, 0.2, 0.8) }),
+    // leaning in on folded arms, the left forearm over the right
+    fold: GP({ lean: 0.3, tilt: 0.2, nod: 0.12, hR: new V3(0.3, 0.14, 1.95), eR: new V3(-0.85, 0.22, 1.5), hL: new V3(-0.3, 0.4, 1.8), eL: new V3(0.85, 0.4, 1.4) }),
     clasp: GP({ lean: 0.24, tilt: 0.24, nod: -0.32, hR: new V3(-0.14, 2.05, 1.5), eR: new V3(-0.85, 0.25, 1.4), hL: new V3(0.14, 2.05, 1.5), eL: new V3(0.85, 0.25, 1.4) }),
-    smoke: GP({ lean: 0.04, tilt: -0.1, nod: 0.02, hR: new V3(-0.85, 1.9, 1.05), eR: new V3(-1.15, 0.25, 1.15), hL: new V3(0.45, 0.22, 1.55), eL: new V3(1.3, 0.2, 0.95) })
+    smoke: GP({ lean: 0.08, tilt: -0.1, nod: 0.02, hR: new V3(-0.85, 1.9, 1.05), eR: new V3(-1.15, 0.25, 1.15), hL: new V3(0.42, 0.11, 1.8), eL: new V3(1.05, 0.2, 0.8) })
   };
   function poseWith(base, changes) {
     var p = GP(base);
@@ -3790,7 +3819,7 @@ function photoTex(name, srgb, rx, ry) {
       if (extra) extra(e, k);
     });
   }
-  var MOUTH = new V3(0, -0.44 * 1.18 + 0.12, 0.66 * 1.18);
+  var MOUTH = new V3(0, -0.44 * HEAD_K + 0.12, 0.66 * HEAD_K);
   var MOUTH_Q = new Q().setFromUnitVectors(X_AXIS, new V3(0.22, -0.2, 1).normalize());
   var G_HOLD_OFF = new V3(0.03, 0.1, 0.07);
   var G_HOLD_Q = new Q().setFromUnitVectors(X_AXIS, new V3(0.45, 0.6, 0.6).normalize());
@@ -3800,7 +3829,7 @@ function photoTex(name, srgb, rx, ry) {
 
   // her little ashtray
   var gTray = new THREE.Group();
-  gTray.position.set(-1.8, 0, -3.8);
+  gTray.position.set(-1.85, 0, -2.35);                                      // on the bar by her right hand
   scene.add(gTray);
   var gTrayMesh = mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.14, 6), M.tray); gTrayMesh.position.y = 0.07; gTray.add(gTrayMesh);
   var gTrayRim = mesh(new THREE.TorusGeometry(0.42, 0.02, 6, 6), M.gGlowPink, false); gTrayRim.rotation.x = Math.PI / 2; gTrayRim.position.y = 0.145; gTray.add(gTrayRim);
@@ -3812,6 +3841,64 @@ function photoTex(name, srgb, rx, ry) {
     return e;
   }
   function setTempExpr(e, dur) { girl.tempExpr = e; girl.tempUntil = clock.elapsedTime + dur; }
+
+  // where she looks: mostly at you, with short glances at whatever is going on (her head turns; the eyes are painted)
+  girl.gaze = { yaw: 0, pitch: 0, at: null, until: 0, next: 4 };
+  girl.idleNext = 9;
+  gHead.rotation.order = "YXZ";
+  var _gzW = new V3(), _gzL = new V3();
+  function girlLookTarget(t) {
+    var g = girl.gaze;
+    if (girl.state === "waiting") { g.at = null; return camera.getWorldPosition(_gzW); }   // pleading: eyes on you
+    if (busy && (state.holding || leftClaims > 0)) {                       // you're doing something: she watches your hands
+      return state.holding && !leftClaims ? right.root.getWorldPosition(_gzW) : left.root.getWorldPosition(_gzW);
+    }
+    if (g.at && t > g.until) g.at = null;
+    if (!g.at && t > g.next) {
+      var opts = [];
+      if (state.holding && pc.lit) opts.push(function (v) { return v.copy(pc.emberWorld()); });
+      if (phoneState === "using") opts.push(function (v) { return phone.getWorldPosition(v); });
+      if (girl.state === "smoking") opts.push(function (v) { return v.copy(gc.tipWorld()); });
+      g.next = t + rand(4, 9);
+      if (opts.length) { g.at = pick(opts); g.until = t + rand(0.9, 2.0); g.next += 2; }
+    }
+    return g.at ? g.at(_gzW) : camera.getWorldPosition(_gzW);
+  }
+  function updateGirl(t, dt) {
+    gPivot.rotation.x = girl.pose.lean;
+    gTorso.scale.y = 1 + Math.sin(t * 1.6) * 0.008;                       // breathing
+    girl.root.updateMatrixWorld(true);
+    if (!(girl.anim && girl.state !== "none")) {                           // hold still while a cigarette is at her lips
+      _gzL.copy(girlLookTarget(t)); gTorso.worldToLocal(_gzL).sub(gHead.position);
+      var wy = THREE.MathUtils.clamp(Math.atan2(_gzL.x, _gzL.z), -0.55, 0.55);
+      var wp = THREE.MathUtils.clamp(-Math.atan2(_gzL.y, Math.hypot(_gzL.x, _gzL.z)), -0.45, 0.18);   // glances down stay small
+      var k = Math.min(1, dt * 4);
+      girl.gaze.yaw += (wy - girl.gaze.yaw) * k; girl.gaze.pitch += (wp - girl.gaze.pitch) * k;
+    }
+    gHead.rotation.set(girl.pose.nod + girl.gaze.pitch * 0.8 + Math.sin(t * 0.9) * 0.02, girl.gaze.yaw * 0.85 + Math.sin(t * 0.5) * 0.03, girl.pose.tilt + Math.sin(t * 0.7) * 0.03);
+    girl.root.updateMatrixWorld(true);
+    updateArm(armR, "R", girl.pose);
+    updateArm(armL, "L", girl.pose);
+    if (t > girl.blinkAt) { girl.blinkUntil = t + 0.13; girl.blinkAt = t + rand(2.5, 5); }
+    var fe = exprNow(t);
+    if (fe !== lastFace) { faceMat.map = girl.face[fe]; lastFace = fe; }
+    if (girl.queued && !girl.anim) toggleGirl();
+    else if (girl.state === "smoking" && !girl.anim && t > girl.nextPuff) girlPuff();
+    else if (girl.state === "none" && !girl.anim && !busy && t > girl.idleNext) girlShift();
+  }
+  // with nothing to smoke she shifts about now and then: forearms on the bar, or leaning in on folded arms
+  async function girlShift() {
+    girl.anim = true; renderUI();
+    await moveGirl(girl.pose.lean < 0.2 ? POSE.fold : POSE.rest, 1.3);
+    if (Math.random() < 0.35) setTempExpr(pick(["happy", "wink"]), 1.4);
+    girl.idleNext = clock.elapsedTime + rand(10, 18);
+    girl.anim = false; renderUI();
+  }
+  function girlSays(p, lines, expr) {                                      // an occasional remark about what you're doing
+    if (!girlOn || girl.anim || girl.state === "waiting" || Math.random() > p) return;
+    showBubble(pick(lines), 2.2);
+    if (expr) setTempExpr(expr, 1.6);
+  }
 
   // ======================= sound (synthesised, no files) =======================
   var sfx = (function () {
@@ -4100,7 +4187,7 @@ function photoTex(name, srgb, rx, ry) {
     updateStatus();
   }
   function updateStatus() {
-    var txt = "拖动画面可以转头", warn = false;
+    var txt = "点桌上的东西就能用 · 拖动画面转头", warn = false;
     if (statusOverride) txt = statusOverride;
     else if (state.holding) {
       if (pc.bodyLen <= 0.02) txt = "烧到头了，摁灭吧";
@@ -4108,8 +4195,8 @@ function photoTex(name, srgb, rx, ry) {
       else if (pc.bodyLen < 0.1) { txt = "快烧到手了！"; warn = true; }
       else if (pc.ash > state.ashDropAt * 0.75) { txt = "烟灰快掉了"; warn = true; }
       else txt = "点着呢";
-    } else if (GIRL_ENABLED && girl.state === "waiting") txt = "她在等你帮忙点火";
-    else if (GIRL_ENABLED && girl.state === "none") txt = "点一下对面的她，可以递支烟";
+    } else if (girlOn && girl.state === "waiting") txt = "她在等你帮忙点火";
+    else if (girlOn && girl.state === "none") txt = "点一下对面的她，可以递支烟";
     if (statusEl.textContent !== txt) statusEl.textContent = txt;
     statusEl.classList.toggle("warn", warn);
   }
@@ -4819,7 +4906,7 @@ function photoTex(name, srgb, rx, ry) {
   }
   function updatePhone(t, dt) {
     nowT = t;
-    if (phoneOn && phoneState === "parked" && leftClaims === 0 && t > leftFreeAt && !(GIRL_ENABLED && girl.anim)) { phoneState = "picking"; phoneDo(pickPhoneUp); }
+    if (phoneOn && phoneState === "parked" && leftClaims === 0 && t > leftFreeAt && !(girlOn && girl.anim)) { phoneState = "picking"; phoneDo(pickPhoneUp); }
     if (!phoneOn && phoneState === "using" && leftClaims === 0) { leftClaims++; phoneDo(putPhoneDown).then(function () { leftClaims--; }); }
     var using = phoneState === "using";
     // screen: bright while it is in hand, dark face down on the bar
@@ -4917,6 +5004,7 @@ function photoTex(name, srgb, rx, ry) {
   async function doBetel() {
     if (busy || chew.on) return;
     lock();
+    girlSays(0.5, ["又吃槟榔…少吃点啦", "给我也来一颗？", "嘴巴会红红的哦"], "plead");
     await claimLeft();
     if (state.betelLeft <= 0) { state.betelLeft = BETEL_N; refreshNuts(); statusOverride = "拆开新的一盒"; }
     lookToward(-0.06, -0.3);                                                // eyes down onto the box
@@ -5014,7 +5102,7 @@ function photoTex(name, srgb, rx, ry) {
       sp.quaternion.setFromUnitVectors(new V3(0, 0, 1), land.n);
       group.add(sp);
     }
-    if (GIRL_ENABLED) { setTempExpr("happy", 2.5); showBubble(pick(["哈哈，掉身上啦～", "小心烫着！", "笨蛋，快拍拍～"]), 2.2); }
+    if (girlOn) { setTempExpr("happy", 2.5); showBubble(pick(["哈哈，掉身上啦～", "小心烫着！", "笨蛋，快拍拍～"]), 2.2); }
     await wait(0.4);
     var patQ = basisZY(land.n, new V3(0.85, 0.1, -0.45));
     var palm = new V3(0, 0.5, -0.15);
@@ -5073,7 +5161,7 @@ function photoTex(name, srgb, rx, ry) {
     saveStats();
     var myToken = ++dropToken;
     setTimeout(function () { if (myToken === dropToken && !state.holding) pc.group.visible = false; }, 4500);
-    if (GIRL_ENABLED) { setTempExpr("plead", 2.4); showBubble(pick(["没事吧？！快吹吹～", "哎呀，烫到了吧！", "笨死了，烟都烧完啦～"]), 2.4); }
+    if (girlOn) { setTempExpr("plead", 2.4); showBubble(pick(["没事吧？！快吹吹～", "哎呀，烫到了吧！", "笨死了，烟都烧完啦～"]), 2.4); }
     // shake the hand to cool it down
     var up = restPos.clone().add(new V3(0.2, 0.25, 0));
     await moveHand(right, { pos: up, quat: restQ, f: FP.open }, 0.25);
@@ -5217,8 +5305,39 @@ function photoTex(name, srgb, rx, ry) {
     renderUI();
   }
 
+  // switching her on and off: she only goes (or comes) while nothing involving her is under way
+  var btnGirlOn = document.getElementById("btnGirlOn");
+  function applyGirl() {
+    girl.root.visible = girlOn; gTray.visible = girlOn;
+    [armR, armL].forEach(function (a) { a.parts.forEach(function (m) { m.visible = girlOn; }); });
+    document.getElementById("girlCtrl").style.display = girlOn ? "" : "none";
+    bubble.style.display = girlOn ? "" : "none";
+    btnGirlOn.textContent = girlOn ? "女孩 开" : "女孩 关";
+    btnGirlOn.classList.toggle("on", girlOn);
+  }
+  function toggleGirl() {
+    if (girl.anim) { girl.queued = !girl.queued; btnGirlOn.textContent = girl.queued ? "女孩 走…" : "女孩 开"; return; }   // she finishes what she is doing first
+    girl.queued = false;
+    girlOn = !girlOn;
+    try { localStorage.setItem("smokesim-girl", girlOn ? "1" : "0"); } catch (e) {}
+    if (!girlOn) {                                                        // she leaves with her cigarette
+      if (gc.group.parent !== scene) scene.attach(gc.group);
+      gc.group.visible = false; gc.lit = false; gc.inhale = 0;
+      girl.state = "none"; girl.baseExpr = "normal"; girl.tempExpr = null;
+      girl.pose = GP(POSE.rest);
+      hideBubble();
+    } else {
+      girl.pose = GP(POSE.rest);
+      setTempExpr("happy", 1.6);
+      showBubble(pick(["嗨～ 我来陪你抽", "又见面啦～", "一个人抽多没意思"]), 2.4);
+    }
+    applyGirl();
+    renderUI();
+  }
+  btnGirlOn.addEventListener("click", toggleGirl);
+
   function clickGirl() {
-    if (!GIRL_ENABLED) return;
+    if (!girlOn) return;
     if (girl.state === "none") doGive();
     else if (girl.state === "waiting") doLightHer();
     else teaseHer();
@@ -5239,6 +5358,7 @@ function photoTex(name, srgb, rx, ry) {
     else if (k === "b") doBetel();
     else if (k === "p") togglePhone();
     else if (k === "o") toggleWindow();
+    else if (k === "g") toggleGirl();
   });
   document.addEventListener("keyup", function (e) { if (e.code === "Space") puffHold = false; });
   btnTap.addEventListener("click", doFlick);
@@ -5250,6 +5370,7 @@ function photoTex(name, srgb, rx, ry) {
   var btnWindow = document.getElementById("btnWindow");
   function toggleWindow() {
     win.open = !win.open;
+    girlSays(0.7, win.open ? ["风好舒服～", "开窗透透气～", "外面好香的空气"] : ["有点冷了", "关上吧，烟都跑没了"], "happy");
     btnWindow.textContent = win.open ? "关窗" : "开窗";
     btnWindow.classList.toggle("on", win.open);
   }
@@ -5285,33 +5406,82 @@ function photoTex(name, srgb, rx, ry) {
     if (hits.length) { puffHold = true; drag = null; doPuff(true); }
   });
   window.addEventListener("pointerup", function () { puffHold = false; });
+
+  // everything on the bar answers to a click: what's under the pointer, and what clicking it would do
+  lighter.userData.pick = "lighter"; betelBox.userData.pick = "betel"; phone.userData.pick = "phone";
+  function pickAt(clientX, clientY) {
+    var r = wrap.getBoundingClientRect();
+    raycaster.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), camera);
+    var targets = [pack, tray, lighter, betelBox, phone, pc.group, right.root, left.root];
+    if (girlOn) targets.push.apply(targets, [girl.root, gc.group].concat(armR.parts, armL.parts));
+    var hits = raycaster.intersectObjects(targets, true);
+    for (var i = 0; i < hits.length; i++) {
+      for (var o = hits[i].object; o; o = o.parent) {
+        if (!o.visible) break;
+        if (o.userData && o.userData.pick) return o.userData.pick;
+        if (o === right.root) return "hand";
+        if (o === left.root) return heldBy(left, phone) ? "phone" : null;
+        if (o === gc.group) return girlOn ? "girl" : null;
+      }
+    }
+    return null;
+  }
+  function useLighter() {
+    if (state.holding && !pc.lit) doLight();
+    else if (girlOn && girl.state === "waiting") clickGirl();
+    else if (!state.holding) doTake().then(function () { if (state.holding && !pc.lit) doLight(); });
+  }
+  function actionFor(p) {                                                   // the hint shown on hover; null = nothing to do
+    var burnt = pc.bodyLen <= 0.02;
+    if (p === "phone") return phoneOn ? "放下手机" : "刷手机";
+    if (p === "tray") return state.floating ? "烟头落回" : "烟头漂浮";
+    if (p === "girl") return girlOn && !girl.anim && (girl.state === "smoking" || !busy) ? btnGirl.textContent : null;
+    if (busy) return null;
+    if (p === "pack") return state.holding ? null : btnTake.textContent;
+    if (p === "betel") return chew.on ? null : btnBetel.textContent;
+    if (p === "lighter") return state.holding && !pc.lit && !burnt ? "点火" : girlOn && girl.state === "waiting" ? "帮她点火" : !state.holding ? "抽一支，点上" : null;
+    if (p === "cig" || p === "hand") return state.holding ? (!pc.lit ? (burnt ? null : "点火") : burnt ? null : "按住吸") : null;
+    return null;
+  }
+  function doPick(p) {
+    if (p === "pack") doTake();
+    else if (p === "tray") toggleFloat();
+    else if (p === "girl") clickGirl();
+    else if (p === "lighter") useLighter();
+    else if (p === "betel") doBetel();
+    else if (p === "phone") togglePhone();
+    else if ((p === "cig" || p === "hand") && state.holding && !pc.lit) doLight();
+  }
   window.addEventListener("pointerup", function (e) {
     if (!drag) return;
     var moved = Math.hypot(e.clientX - drag.x, e.clientY - drag.y), dt = Date.now() - drag.t;
     drag = null;
+    canvas.style.cursor = "";
     if (moved > 6 || dt > 500 || e.target !== canvas) return;
-    var r = wrap.getBoundingClientRect();
-    var ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-    raycaster.setFromCamera(ndc, camera);
-    var targets = [pack, tray, pc.group, right.root, girl.root, gc.group,
-      armR.upper, armR.fore, armR.hand, armL.upper, armL.fore, armL.hand];
-    var hits = raycaster.intersectObjects(targets, true);
-    for (var i = 0; i < hits.length; i++) {
-      var o = hits[i].object, p = null;
-      while (o) {
-        if (o.userData && o.userData.pick) { p = o.userData.pick; break; }
-        if (o === right.root) { p = "hand"; break; }
-        if (o === gc.group) { p = "girl"; break; }
-        o = o.parent;
-      }
-      if (!p) continue;
-      if (p === "pack") doTake();
-      else if (p === "tray") toggleFloat();
-      else if (p === "girl") clickGirl();
-      else if ((p === "cig" || p === "hand") && state.holding && !pc.lit) doLight();
-      break;
-    }
+    var p = pickAt(e.clientX, e.clientY);
+    if (p) { doPick(p); hover.dirty = true; }
   });
+  // hover: a pointing cursor and a small hint beside the pointer (mouse only, looked up once per frame)
+  var labelHover = document.getElementById("labelHover");
+  var hover = { x: 0, y: 0, on: false, dirty: false, n: 0 };
+  wrap.addEventListener("pointermove", function (e) {
+    if (e.pointerType === "touch") return;
+    hover.x = e.clientX; hover.y = e.clientY; hover.on = e.target === canvas; hover.dirty = true;
+    if (drag && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 6) canvas.style.cursor = "grabbing";
+  });
+  wrap.addEventListener("pointerleave", function () { hover.on = false; hover.dirty = true; });
+  function updateHover() {
+    if (!hover.dirty && !(hover.on && ++hover.n % 8 === 0)) return;          // re-ask now and then: the answer changes as actions run
+    hover.dirty = false;
+    var txt = hover.on && !drag ? actionFor(pickAt(hover.x, hover.y)) : null;
+    if (!drag) canvas.style.cursor = txt ? "pointer" : "";
+    if (txt) {
+      var r = wrap.getBoundingClientRect();
+      if (labelHover.textContent !== txt) labelHover.textContent = txt;
+      labelHover.style.left = (hover.x - r.left + 14) + "px"; labelHover.style.top = (hover.y - r.top - 8) + "px";
+    }
+    labelHover.style.opacity = txt ? 0.95 : 0;
+  }
 
   // ======================= labels =======================
   var pv = new V3();
@@ -5323,12 +5493,7 @@ function photoTex(name, srgb, rx, ry) {
   }
 
   // ======================= init =======================
-  if (!GIRL_ENABLED) {
-    girl.root.visible = false; gTray.visible = false; gc.group.visible = false;
-    [armR, armL].forEach(function (a) { [a.upper, a.fore, a.elbow, a.cuff, a.hand, a.thumb].forEach(function (m) { m.visible = false; }); });
-    document.getElementById("girlCtrl").style.display = "none";
-    bubble.style.display = "none";
-  }
+  applyGirl();
   loadStats();
   state.buttLens.forEach(function (l) { addButt(l); });
   refreshTips();
@@ -5460,6 +5625,8 @@ function photoTex(name, srgb, rx, ry) {
     var want = 40;
     if (pack.parent !== scene) {                                            // taking one out: look at the pack
       want = -pack.localToWorld(new V3(0, PH * 0.8, 0)).applyMatrix4(camera.matrixWorldInverse).z;
+    } else if (girlOn && (girl.state === "waiting" || (girl.anim && girl.state === "none" && busy))) {   // eyes on her
+      want = -gHead.getWorldPosition(new V3()).applyMatrix4(camera.matrixWorldInverse).z;
     } else if (phoneState === "using" && !busy) {                           // scrolling: the eyes are on the screen
       want = -phone.getWorldPosition(new V3()).applyMatrix4(camera.matrixWorldInverse).z;
     } else if (state.holding && pc.group.visible) {
@@ -5533,18 +5700,7 @@ function photoTex(name, srgb, rx, ry) {
     updatePlayerArm(right, dt); updatePlayerArm(left, dt);
 
     // her
-    if (GIRL_ENABLED) {
-    gPivot.rotation.x = girl.pose.lean;
-    gHead.rotation.set(girl.pose.nod + Math.sin(t * 0.9) * 0.02, Math.sin(t * 0.5) * 0.04, girl.pose.tilt + Math.sin(t * 0.7) * 0.03);
-    gTorso.scale.y = 1 + Math.sin(t * 1.6) * 0.008;
-    girl.root.updateMatrixWorld(true);
-    updateArm(armR, "R", girl.pose);
-    updateArm(armL, "L", girl.pose);
-    if (t > girl.blinkAt) { girl.blinkUntil = t + 0.13; girl.blinkAt = t + rand(2.5, 5); }
-    var fe = exprNow(t);
-    if (fe !== lastFace) { faceMat.map = girl.face[fe]; lastFace = fe; }
-    if (girl.state === "smoking" && !girl.anim && t > girl.nextPuff) girlPuff();
-    }
+    if (girlOn) updateGirl(t, dt);
 
     // smoke + sparks
     updateSmoke(t, dt);
@@ -5580,9 +5736,10 @@ function photoTex(name, srgb, rx, ry) {
     lw.y += 0.7 + (state.floating ? 0.55 + topLayer * 0.3 : topLayer * LAYER_H);
     labelTray.style.opacity = place(labelTray, lw) ? 0.92 : 0;
     if (bubbleUntil && t > bubbleUntil) hideBubble();
-    if (GIRL_ENABLED) place(bubble, girlHeadTop());
+    if (girlOn) place(bubble, girlHeadTop());
 
     updateStatus();
+    updateHover();
     updateFocus(dt);
     updateBody(t, dt);
     updateChew(t, dt);
