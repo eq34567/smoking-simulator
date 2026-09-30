@@ -1121,21 +1121,31 @@ function photoTex(name, srgb, rx, ry) {
     neonPink: new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff4fa3).multiplyScalar(1.5) }),
     neonCyan: new THREE.MeshBasicMaterial({ color: new THREE.Color(0x35e6ff).multiplyScalar(1.5) }),
     // her — deliberately cel-shaded against the photoreal room
-    gSkin: new THREE.MeshToonMaterial({ color: 0xc8957e }),              // darker than it looks: the lamp is right in front of her
-    gHair: new THREE.MeshToonMaterial({ color: 0x1d1230, side: THREE.DoubleSide }),
-    gHairTip: new THREE.MeshToonMaterial({ color: 0xff6fb5, emissive: 0xff2f90, emissiveIntensity: 0.25 }),
-    gJacket: new THREE.MeshToonMaterial({ color: 0x1b1e2b }),
+    gSkin: new THREE.MeshToonMaterial({ color: 0xd49e8a }),              // darker than it looks: the lamp is right in front of her
+    gHair: new THREE.MeshToonMaterial({ color: 0xe0578f, side: THREE.DoubleSide }),
+    gHairTip: new THREE.MeshToonMaterial({ color: 0xffa6cf }),
+    gTrim: new THREE.MeshToonMaterial({ color: 0xff5f9e }),
+    gJacket: new THREE.MeshToonMaterial({ color: 0x1a1420 }),                 // the black dress
     gGlowCyan: new THREE.MeshStandardMaterial({ color: 0x35e6ff, emissive: 0x35e6ff, emissiveIntensity: 2.4 }),
     gGlowPink: new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 2.4 }),
-    gBlack: new THREE.MeshToonMaterial({ color: 0x14121a }),
+    gBlack: new THREE.MeshToonMaterial({ color: 0x0c0a10 }),
     outline: new THREE.MeshBasicMaterial({ color: 0x07060b, side: THREE.BackSide })
   };
   var toonGrad = canvasTex(5, 1, function (g) {
-    var stops = ["#2b2b39", "#4d4d63", "#7b7b93", "#a5a5bb", "#cdcdd9"];
+    var stops = ["#1f1b25", "#342e3b", "#4a4352", "#615969", "#787080"];   // kept low: the lamp is right above her
     for (var i = 0; i < 5; i++) { g.fillStyle = stops[i]; g.fillRect(i, 0, 1, 1); }
   }, true);
   toonGrad.minFilter = toonGrad.magFilter = THREE.NearestFilter;
-  [M.gSkin, M.gHair, M.gHairTip, M.gJacket, M.gBlack].forEach(function (m) { m.gradientMap = toonGrad; });
+  [M.gSkin, M.gHair, M.gHairTip, M.gTrim, M.gJacket, M.gBlack].forEach(function (m) { m.gradientMap = toonGrad; });
+  // anime-style rim light: a thin bright edge where the surface turns away from us
+  function rimLight(m, col, k) {
+    m.onBeforeCompile = function (sh) {
+      sh.uniforms.rimCol = { value: new THREE.Color(col) }; sh.uniforms.rimK = { value: k };
+      sh.fragmentShader = "uniform vec3 rimCol; uniform float rimK;\n" + sh.fragmentShader.replace("#include <opaque_fragment>",
+        "outgoingLight += rimCol * rimK * smoothstep(0.55, 0.85, 1.0 - abs(dot(normalize(normal), normalize(vViewPosition))));\n#include <opaque_fragment>");
+    };
+  }
+  rimLight(M.gSkin, 0xffb3c8, 0.35); rimLight(M.gHair, 0xffc4e0, 0.5); rimLight(M.gJacket, 0x9a7cff, 0.45); rimLight(M.gBlack, 0x9a7cff, 0.3);
   function outline(m, k) {
     var o = new THREE.Mesh(m.geometry, M.outline);
     o.scale.setScalar(k || 1.05);
@@ -3545,218 +3555,230 @@ function photoTex(name, srgb, rx, ry) {
   }
 
   // ======================= her =======================
+  // A grown woman across the bar: long pink hair, an off-shoulder black dress, cel-shaded with a rim light.
+  // Real scale like everything else (1 = 10 cm): she sits on a stool with her hips 30 cm below the bar top,
+  // shoulders about 28 cm above it and her eyes level with ours.
   var girl = {
     root: new THREE.Group(), state: "none", anim: false,
     baseExpr: "normal", tempExpr: null, tempUntil: 0, blinkAt: 2.5, blinkUntil: 0,
     nextPuff: 0, face: {}, pose: null
   };
-  girl.root.position.set(0, 0, -4.1);                                      // just past the far edge of the bar (z -3)
+  girl.root.position.set(0, 0, -4.4);                                      // the bar's far edge (z -3) is 1.4 in front of her
   girl.root.userData.pick = "girl";
   scene.add(girl.root);
-  var gPivot = new THREE.Group(); gPivot.position.set(0, -0.5, 0); girl.root.add(gPivot);
-  var gTorso = new THREE.Group(); gTorso.position.set(0, -0.1, 0); gPivot.add(gTorso);
+  var gPivot = new THREE.Group(); gPivot.position.set(0, -3.0, 0); girl.root.add(gPivot);   // the hips: she leans from here
+  var gTorso = new THREE.Group(); gPivot.add(gTorso);
+  function gLathe(pts, mat, sx, sz, parent) {
+    var m = mesh(new THREE.LatheGeometry(pts.map(function (p) { return new THREE.Vector2(p[0], p[1]); }), 40), mat);
+    m.scale.set(sx, 1, sz); (parent || gTorso).add(m); return m;
+  }
   (function () {
-    // an oversized hoodie: a turned profile (waist, ribs, full chest, sloping shoulders) flattened front to back
-    var prof = [[0.001, -1.3], [0.6, -1.3], [0.64, -0.6], [0.62, 0.1], [0.7, 0.7], [0.84, 1.3], [0.9, 1.8], [0.88, 2.15], [0.74, 2.45], [0.5, 2.62], [0.36, 2.7], [0.001, 2.7]]
-      .map(function (p) { return new THREE.Vector2(p[0], p[1]); });
-    var body = mesh(new THREE.LatheGeometry(prof, 32), M.gJacket);
-    body.scale.set(1.12, 1, 0.66); gTorso.add(body); outline(body, 1.03);
+    // the dress, hips up to a straight neckline just above the bust
+    var dress = gLathe([[0.001, 0], [1.45, 0], [1.5, 0.6], [1.3, 1.6], [1.1, 2.3], [1.18, 3.0], [1.34, 3.6], [1.42, 4.15], [1.36, 4.7], [1.3, 5.0], [0.001, 5.0]], M.gJacket, 1, 0.64);
+    outline(dress, 1.02);
     [-1, 1].forEach(function (s) {
-      var sh = mesh(new THREE.SphereGeometry(0.3, 16, 12), M.gJacket); sh.position.set(0.9 * s, 2.26, 0); sh.scale.set(1, 0.72, 0.95); gTorso.add(sh); outline(sh, 1.06);
-      var stripe = mesh(new THREE.BoxGeometry(0.36, 0.03, 0.05), M.gGlowCyan, false); stripe.position.set(0.9 * s, 2.48, 0.02); gTorso.add(stripe);
-      // drawstrings hanging from the neckline, with little glowing tips
-      var cord = mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.75, 6), M.gBlack, false);
-      cord.position.set(0.17 * s, 2.25, 0.6); cord.rotation.set(-0.12, 0, 0.05 * s); gTorso.add(cord);
-      var tip = mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.09, 8), M.gGlowPink, false); tip.position.set(0.19 * s, 1.85, 0.64); gTorso.add(tip);
+      var b = mesh(new THREE.SphereGeometry(0.6, 20, 14), M.gJacket); b.position.set(0.5 * s, 4.3, 0.55); b.scale.set(1, 0.88, 0.75); gTorso.add(b);
     });
-    // the hood, bunched up behind the neck
-    var hood = mesh(new THREE.SphereGeometry(0.5, 20, 14), M.gJacket); hood.position.set(0, 2.45, -0.5); hood.scale.set(1.0, 0.5, 0.45); gTorso.add(hood); outline(hood, 1.05);
-    var hoodRim = mesh(new THREE.TorusGeometry(0.44, 0.065, 10, 28, Math.PI * 1.3), M.gJacket); hoodRim.rotation.set(Math.PI / 2 + 0.25, 0, Math.PI * 0.85); hoodRim.position.set(0, 2.66, -0.05); gTorso.add(hoodRim); outline(hoodRim, 1.06);   // arc open at the front
-    var col = mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.35, 20), M.gJacket); col.position.y = 2.72; gTorso.add(col);
-    var ring = mesh(new THREE.TorusGeometry(0.41, 0.022, 8, 28), M.gGlowCyan, false); ring.rotation.x = Math.PI / 2; ring.position.y = 2.89; gTorso.add(ring);
-    var neck = mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.5, 14), M.gSkin); neck.position.y = 3.0; gTorso.add(neck);
-    var choker = mesh(new THREE.TorusGeometry(0.2, 0.028, 8, 24), M.gBlack); choker.rotation.x = Math.PI / 2; choker.position.y = 3.06; gTorso.add(choker);
-    var gem = mesh(new THREE.SphereGeometry(0.035, 8, 6), M.gGlowPink, false); gem.position.set(0, 3.03, 0.22); gTorso.add(gem);
+    var trim = mesh(new THREE.TorusGeometry(1.3, 0.045, 8, 56), M.gTrim, false); trim.rotation.x = Math.PI / 2; trim.scale.set(1, 0.645, 1); trim.position.y = 5.0; gTorso.add(trim);
+    // bare shoulders and collarbones above it
+    gLathe([[1.3, 4.95], [1.42, 5.25], [1.36, 5.55], [1.0, 5.85], [0.55, 6.05], [0.001, 6.1]], M.gSkin, 1, 0.6);
+    [-1, 1].forEach(function (s) {
+      var sh = mesh(new THREE.SphereGeometry(0.42, 18, 14), M.gSkin); sh.position.set(1.45 * s, 5.33, 0); sh.scale.set(1, 0.85, 0.95); gTorso.add(sh);
+    });
+    var neck = mesh(new THREE.CylinderGeometry(0.34, 0.42, 1.1, 18), M.gSkin); neck.position.y = 6.35; gTorso.add(neck);
+    var choker = mesh(new THREE.TorusGeometry(0.37, 0.055, 8, 28), M.gBlack); choker.rotation.x = Math.PI / 2; choker.position.y = 6.45; gTorso.add(choker);
+    var gem = mesh(new THREE.OctahedronGeometry(0.07), M.gGlowPink, false); gem.position.set(0, 6.36, 0.4); gem.scale.y = 1.5; gTorso.add(gem);
   })();
-  var gHead = new THREE.Group(); gHead.position.set(0, 3.72, 0.05); gTorso.add(gHead);
-  var HEAD_K = 1.05;
-  var gHeadS = new THREE.Group(); gHeadS.scale.setScalar(HEAD_K); gHeadS.position.y = 0.12; gHead.add(gHeadS);
-  var HEAD_SCALE = new V3(0.95, 1.04, 0.92);
-  var gHeadShape = new THREE.Group(); gHeadShape.scale.copy(HEAD_SCALE); gHeadS.add(gHeadShape);
-  var headBall = mesh(new THREE.SphereGeometry(0.85, 36, 24), M.gSkin);
-  gHeadShape.add(headBall); outline(headBall, 1.035);
 
-  // face expressions (drawn onto the front of the head)
+  // head: a sphere pulled into a grown-up face, narrowing to a pointed chin; the face is painted on a skin-tight shell
+  var gHead = new THREE.Group(); gHead.position.set(0, 6.75, 0.05); gTorso.add(gHead);   // pivots at the top of the neck
+  var HEAD_C = new V3(0, 1.05, 0.12);                                       // centre of the skull (head space)
+  function headShape(v) {                                                   // unit sphere point -> head surface around HEAD_C
+    var t = Math.max(0, -v.y);                                              // 0 above the eyes, 1 at the chin
+    v.x *= 0.76 * (1 - 0.3 * t * t);
+    v.z = v.z * 0.86 * (1 - 0.1 * t * t) + 0.22 * t * t;
+    if (v.y < 0) v.y *= 1.03;
+    return v;
+  }
+  function shapedSphere(r, a, b, c, d, e, f, g) {
+    var geo = new THREE.SphereGeometry(1, a, b, c, d, e, f), p = geo.attributes.position, v = new V3();
+    for (var i = 0; i < p.count; i++) { v.set(p.getX(i), p.getY(i), p.getZ(i)); headShape(v).multiplyScalar(r); p.setXYZ(i, v.x, v.y, v.z); }
+    geo.computeVertexNormals();
+    return geo;
+  }
+  function headPoint(theta, phi, r) {                                        // a point on the head surface, head space
+    return headShape(new V3(-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta))).multiplyScalar(r || 1).add(HEAD_C);
+  }
+  var headBall = mesh(shapedSphere(1, 48, 36), M.gSkin); headBall.position.copy(HEAD_C); gHead.add(headBall); outline(headBall, 1.025);
+  // the face texture spans phi = front +-0.95 and theta 0.85..2.75; in its 256 space: brows y 67, eyes y 101 at x 83 / 173,
+  // nose y 148, mouth y 182, chin y 249
+  var FACE_PHI = 1.9, FACE_TH0 = 0.85, FACE_TH = 1.9;
   function drawFace(g, e) {
-    var S = 2;                       // 512px canvas, coordinates stay in the old 256 space
+    var S = 2;
     g.setTransform(S, 0, 0, S, 0, 0);
     g.clearRect(0, 0, 256, 256);
-    var L = { x: 78, y: 142 }, R = { x: 178, y: 142 };
-    var big = e === "plead";
-    // soft shading under the fringe and along the jaw
-    var sh = g.createLinearGradient(0, 70, 0, 130);
-    sh.addColorStop(0, "rgba(150,92,96,0.30)"); sh.addColorStop(1, "rgba(150,92,96,0)");
-    g.fillStyle = sh; g.fillRect(0, 70, 256, 60);
-    // blush
-    var blushA = (big || e === "happy" || e === "wink") ? 0.42 : 0.22;
-    [[58, 172], [198, 172]].forEach(function (p) {
-      var gr = g.createRadialGradient(p[0], p[1], 0, p[0], p[1], 26);
-      gr.addColorStop(0, "rgba(255,124,150," + blushA + ")"); gr.addColorStop(1, "rgba(255,124,150,0)");
-      g.fillStyle = gr; g.fillRect(p[0] - 28, p[1] - 28, 56, 56);
-      g.strokeStyle = "rgba(255,120,145," + (blushA * 0.7) + ")"; g.lineWidth = 1.6;
-      for (var i = -1; i <= 1; i++) {
-        g.beginPath(); g.moveTo(p[0] - 11, p[1] + i * 6 + 2); g.lineTo(p[0] + 11, p[1] + i * 6 - 2); g.stroke();
-      }
-    });
+    var L = { x: 84, y: 101 }, R = { x: 172, y: 101 };
     g.lineCap = "round"; g.lineJoin = "round";
     function ell(x, y, rx, ry, rot) { g.beginPath(); g.ellipse(x, y, rx, ry, rot || 0, 0, Math.PI * 2); g.fill(); }
-    function brow(p, side) {
-      var y = p.y - 44, inner = p.x - side * 16, outer = p.x + side * 18;
-      g.strokeStyle = "#4b2f52"; g.lineWidth = 4.5;
-      g.beginPath();
-      if (big) { g.moveTo(inner, y - 7); g.quadraticCurveTo(p.x, y - 2, outer, y + 6); }
-      else { g.moveTo(inner, y + 3); g.quadraticCurveTo(p.x - side * 2, y - 7, outer, y + 1); }
-      g.stroke();
+    // soft shadow under the fringe, and a little colour on the cheeks
+    var sh = g.createLinearGradient(0, 40, 0, 88); sh.addColorStop(0, "rgba(120,60,80,0.35)"); sh.addColorStop(1, "rgba(120,60,80,0)");
+    g.fillStyle = sh; g.fillRect(0, 40, 256, 48);
+    var blushA = e === "happy" || e === "wink" || e === "plead" ? 0.34 : 0.18;
+    [[70, 136], [186, 136]].forEach(function (p) {
+      var gr = g.createRadialGradient(p[0], p[1], 0, p[0], p[1], 24);
+      gr.addColorStop(0, "rgba(255,110,140," + blushA + ")"); gr.addColorStop(1, "rgba(255,110,140,0)");
+      g.fillStyle = gr; g.fillRect(p[0] - 26, p[1] - 26, 52, 52);
+    });
+    // side = -1 for the eye on the viewer's left; the outer corner sweeps up and out (cat eye)
+    function lids(p, side, open) {
+      var inn = { x: p.x - side * 25, y: p.y + 3 }, out = { x: p.x + side * 31, y: p.y - 7 };
+      return { inn: inn, out: out, up: { x: p.x + side * 2, y: p.y - 18 - open * 12 }, lo: { x: p.x, y: p.y + 15 } };
     }
-    function openEye(p, side) {
-      var rx = big ? 22 : 20, ry = big ? 28 : 26;
+    function brow(p, side, lift) {
+      g.strokeStyle = "#5a2440"; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(p.x - side * 22, p.y - 32 - lift); g.quadraticCurveTo(p.x + side * 4, p.y - 44 - lift * 0.5, p.x + side * 30, p.y - 36); g.stroke();
+    }
+    function openEye(p, side, open) {
+      var k = lids(p, side, open);
+      // eyeshadow
+      var es = g.createRadialGradient(p.x + side * 8, p.y - 14, 2, p.x + side * 8, p.y - 14, 30);
+      es.addColorStop(0, "rgba(220,70,130,0.32)"); es.addColorStop(1, "rgba(220,70,130,0)");
+      g.fillStyle = es; g.fillRect(p.x - 40, p.y - 46, 80, 50);
       g.save();
-      g.beginPath(); g.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2); g.clip();
-      g.fillStyle = "#f4f2f8"; g.fillRect(p.x - rx, p.y - ry, rx * 2, ry * 2);
-      // iris
-      var ig = g.createLinearGradient(0, p.y - ry, 0, p.y + ry);
-      ig.addColorStop(0, "#2a1560"); ig.addColorStop(0.45, "#7b47f0"); ig.addColorStop(1, "#59e8ff");
-      g.fillStyle = ig; ell(p.x, p.y + 3, rx - 3, ry - 4);
-      // iris ring + pupil
-      g.strokeStyle = "rgba(24,10,48,0.85)"; g.lineWidth = 3;
-      g.beginPath(); g.ellipse(p.x, p.y + 3, rx - 3, ry - 4, 0, 0, Math.PI * 2); g.stroke();
-      g.fillStyle = "#170b2c"; ell(p.x, p.y + 4, rx * 0.35, ry * 0.42);
-      // shadow from the upper lid
-      var lg = g.createLinearGradient(0, p.y - ry, 0, p.y);
-      lg.addColorStop(0, "rgba(30,12,60,0.55)"); lg.addColorStop(1, "rgba(30,12,60,0)");
-      g.fillStyle = lg; g.fillRect(p.x - rx, p.y - ry, rx * 2, ry);
-      // catchlights
-      g.fillStyle = "#ffffff"; ell(p.x - 6, p.y - 9, 6.5, 7.5, -0.3);
-      g.fillStyle = "rgba(255,255,255,0.85)"; ell(p.x + 7, p.y + 9, 3.4, 3);
-      if (big) { g.fillStyle = "rgba(255,255,255,0.9)"; ell(p.x + 8, p.y - 6, 3.2, 3.6); }
+      g.beginPath(); g.moveTo(k.inn.x, k.inn.y); g.quadraticCurveTo(k.up.x, k.up.y, k.out.x, k.out.y); g.quadraticCurveTo(k.lo.x, k.lo.y, k.inn.x, k.inn.y); g.closePath(); g.clip();
+      g.fillStyle = "#f6eef4"; g.fillRect(p.x - 40, p.y - 40, 80, 70);
+      var ix = p.x - side * 1, iy = p.y + 1;
+      var ig = g.createLinearGradient(0, iy - 17, 0, iy + 17);
+      ig.addColorStop(0, "#3a0628"); ig.addColorStop(0.45, "#c2266f"); ig.addColorStop(0.85, "#ff8cc4"); ig.addColorStop(1, "#ffd0e6");
+      g.fillStyle = ig; ell(ix, iy, 15, 17);
+      g.strokeStyle = "rgba(40,4,26,0.9)"; g.lineWidth = 2.2; g.beginPath(); g.ellipse(ix, iy, 15, 17, 0, 0, Math.PI * 2); g.stroke();
+      g.fillStyle = "#1a0312"; ell(ix, iy + 1, 4, 9);
+      var lid = g.createLinearGradient(0, k.up.y, 0, p.y + 2);            // the upper lid's shadow over the iris
+      lid.addColorStop(0, "rgba(40,6,30,0.75)"); lid.addColorStop(1, "rgba(40,6,30,0)");
+      g.fillStyle = lid; g.fillRect(p.x - 40, k.up.y, 80, p.y + 2 - k.up.y);
+      g.fillStyle = "#fff"; ell(ix - 5, iy - 7, 4.5, 5.5, -0.4);
+      g.fillStyle = "rgba(255,255,255,0.8)"; ell(ix + 6, iy + 8, 2.2, 1.8);
       g.restore();
-      // lash line
-      g.strokeStyle = "#2a1330"; g.lineWidth = 6;
-      g.beginPath(); g.ellipse(p.x, p.y, rx + 1, ry + 1, 0, Math.PI * 1.02, Math.PI * 1.98); g.stroke();
-      g.lineWidth = 4.5;
-      g.beginPath(); g.moveTo(p.x + side * (rx - 3), p.y - ry * 0.5); g.lineTo(p.x + side * (rx + 9), p.y - ry * 0.95); g.stroke();
-      g.lineWidth = 2.4;
-      g.beginPath(); g.moveTo(p.x - side * (rx - 6), p.y - ry * 0.82); g.lineTo(p.x - side * (rx + 1), p.y - ry * 1.12); g.stroke();
-      // lower lid
-      g.strokeStyle = "rgba(80,40,90,0.55)"; g.lineWidth = 2;
-      g.beginPath(); g.moveTo(p.x - rx * 0.8, p.y + ry * 0.95); g.quadraticCurveTo(p.x, p.y + ry * 1.12, p.x + rx * 0.8, p.y + ry * 0.9); g.stroke();
+      // lash line with a wing, crease, a few lower lashes
+      g.strokeStyle = "#16060f"; g.lineWidth = 5;
+      g.beginPath(); g.moveTo(k.inn.x, k.inn.y); g.quadraticCurveTo(k.up.x, k.up.y, k.out.x, k.out.y); g.lineTo(k.out.x + side * 9, k.out.y - 7); g.stroke();
+      g.lineWidth = 1.6; g.strokeStyle = "rgba(90,30,60,0.6)";
+      g.beginPath(); g.moveTo(k.inn.x + side * 6, k.inn.y - 10); g.quadraticCurveTo(k.up.x, k.up.y - 8, k.out.x - side * 2, k.out.y - 9); g.stroke();
+      g.strokeStyle = "rgba(40,10,30,0.55)"; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(p.x + side * 4, k.lo.y - 3); g.quadraticCurveTo(p.x + side * 20, k.lo.y - 6, k.out.x, k.out.y + 2); g.stroke();
     }
-    function closedEye(p, side) {
-      g.strokeStyle = "#2a1330"; g.lineWidth = 5.5;
-      g.beginPath(); g.moveTo(p.x - 19, p.y - 3); g.quadraticCurveTo(p.x, p.y + 11, p.x + 19, p.y - 3); g.stroke();
-      g.lineWidth = 3;
-      g.beginPath(); g.moveTo(p.x + side * 19, p.y - 4); g.lineTo(p.x + side * 26, p.y - 11); g.stroke();
+    function closedEye(p, side, smile) {
+      var k = lids(p, side, 0);
+      g.strokeStyle = "#16060f"; g.lineWidth = 4.5;
+      g.beginPath(); g.moveTo(k.inn.x, k.inn.y); g.quadraticCurveTo(p.x, p.y + (smile ? -10 : 9), k.out.x, k.out.y + 4); g.lineTo(k.out.x + side * 8, k.out.y - 2); g.stroke();
+      if (!smile) { g.lineWidth = 1.6; for (var i = 0; i < 3; i++) { var x = p.x + side * (4 + i * 9); g.beginPath(); g.moveTo(x, p.y + 6); g.lineTo(x + side * 3, p.y + 11); g.stroke(); } }
     }
-    function happyEye(p, side) {
-      g.strokeStyle = "#2a1330"; g.lineWidth = 5.5;
-      g.beginPath(); g.moveTo(p.x - 19, p.y + 8); g.quadraticCurveTo(p.x, p.y - 16, p.x + 19, p.y + 8); g.stroke();
-      g.lineWidth = 3;
-      g.beginPath(); g.moveTo(p.x + side * 19, p.y + 6); g.lineTo(p.x + side * 26, p.y - 2); g.stroke();
-    }
-    brow(L, -1); brow(R, 1);
-    if (e === "normal") { openEye(L, -1); openEye(R, 1); }
-    else if (e === "blink" || e === "puff") { closedEye(L, -1); closedEye(R, 1); }
-    else if (e === "happy") { happyEye(L, -1); happyEye(R, 1); }
-    else if (e === "plead") { openEye(L, -1); openEye(R, 1); }
-    else if (e === "wink") { openEye(L, -1); happyEye(R, 1); }
-    // nose
-    g.strokeStyle = "rgba(168,104,104,0.55)"; g.lineWidth = 2.4;
-    g.beginPath(); g.moveTo(130, 182); g.lineTo(125, 189); g.stroke();
-    // mouth
-    g.fillStyle = "#c04a6b"; g.strokeStyle = "#b8425f"; g.lineWidth = 3.4;
-    if (e === "happy") {
-      g.beginPath(); g.moveTo(112, 206); g.quadraticCurveTo(128, 232, 144, 206); g.closePath(); g.fill();
-      g.fillStyle = "#ff96b4"; ell(128, 219, 7, 3.4);
-    } else if (e === "plead" || e === "puff") {
-      ell(128, 212, 6, 5);
-      g.fillStyle = "rgba(255,150,180,0.5)"; ell(126, 210, 2.4, 1.8);
-    } else {
-      g.beginPath(); g.moveTo(116, 208); g.quadraticCurveTo(128, 219, 140, 208); g.stroke();
+    brow(L, -1, e === "plead" ? 6 : 0); brow(R, 1, e === "plead" ? 6 : 0);
+    var open = e === "plead" ? 1 : 0.35;                                    // she looks at you from under her lashes
+    if (e === "blink" || e === "puff") { closedEye(L, -1); closedEye(R, 1); }
+    else if (e === "happy") { closedEye(L, -1, true); closedEye(R, 1, true); }
+    else if (e === "wink") { openEye(L, -1, open); closedEye(R, 1, true); }
+    else { openEye(L, -1, open); openEye(R, 1, open); }
+    g.fillStyle = "#3a1424"; ell(194, 124, 1.8, 1.8);                     // beauty mark
+    g.strokeStyle = "rgba(150,80,90,0.55)"; g.lineWidth = 2;               // nose
+    g.beginPath(); g.moveTo(131, 140); g.lineTo(127, 149); g.lineTo(131, 150); g.stroke();
+    // lips
+    g.fillStyle = "#c93c69"; g.strokeStyle = "#8e1f47"; g.lineWidth = 2.2;
+    if (e === "puff") { ell(128, 184, 6, 5.5); g.fillStyle = "#4a0a22"; ell(128, 184, 2.6, 2.4); }
+    else if (e === "plead") { ell(128, 185, 10, 5); g.fillStyle = "#5a1028"; ell(128, 184, 6, 1.6); }
+    else {
+      var up = e === "happy" || e === "wink" ? 5 : 2.5;                    // a smirk: one corner higher
+      g.beginPath(); g.moveTo(114, 182); g.quadraticCurveTo(128, 186, 143, 180 - up); g.stroke();
+      g.fillStyle = "rgba(210,70,110,0.85)"; g.beginPath(); g.moveTo(119, 184); g.quadraticCurveTo(128, 193, 138, 183); g.quadraticCurveTo(128, 186, 119, 184); g.fill();
+      g.fillStyle = "rgba(255,190,210,0.7)"; ell(129, 187, 3, 1.2);
     }
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
   ["normal", "blink", "happy", "plead", "puff", "wink"].forEach(function (e) {
     girl.face[e] = canvasTex(512, 512, function (g) { drawFace(g, e); });
   });
-  var faceMat = new THREE.MeshToonMaterial({ map: girl.face.normal, color: new THREE.Color(0.82, 0.82, 0.82), gradientMap: toonGrad, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  var faceMesh = new THREE.Mesh(new THREE.SphereGeometry(0.853, 32, 20, Math.PI / 2 - 0.9, 1.8, 0.9, 1.4), faceMat);
-  gHeadShape.add(faceMesh);
+  var faceMat = new THREE.MeshToonMaterial({ map: girl.face.normal, color: new THREE.Color(0.9, 0.9, 0.9), gradientMap: toonGrad, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  var faceMesh = new THREE.Mesh(shapedSphere(1.004, 40, 30, Math.PI / 2 - FACE_PHI / 2, FACE_PHI, FACE_TH0, FACE_TH), faceMat);
+  faceMesh.position.copy(HEAD_C); gHead.add(faceMesh);
 
-  // hair
+  // hair: a cap, the back of the head, a side-swept fringe, two long locks framing the face, and the long fall down
+  // her back (that part hangs from her shoulders, not her head); a thin halo floats over it all
   (function () {
-    var cap = mesh(new THREE.SphereGeometry(0.9, 32, 16, 0, Math.PI * 2, 0, 1.28), M.gHair); cap.scale.copy(HEAD_SCALE); gHeadS.add(cap); outline(cap, 1.035);
-    var back = mesh(new THREE.SphereGeometry(0.93, 32, 20, Math.PI / 2 + 1.0, Math.PI * 2 - 2.0, 0, 2.35), M.gHair); back.scale.copy(HEAD_SCALE); gHeadS.add(back);
-    // long hair down the back: an open curved sheet round the back of the head, flaring over the shoulders,
-    // its lower edge cut into points like drawn strands
-    var hg = new THREE.CylinderGeometry(0.86, 1.02, 1.9, 40, 6, true, Math.PI / 2 + 0.2, Math.PI - 0.4);   // theta 0 = her front
+    var cap = mesh(shapedSphere(1.07, 40, 16, 0, Math.PI * 2, 0, 1.12), M.gHair); cap.position.copy(HEAD_C).add(new V3(0, 0.04, -0.02)); gHead.add(cap); outline(cap, 1.02);
+    var back = mesh(shapedSphere(1.08, 40, 24, Math.PI / 2 + 1.05, Math.PI * 2 - 2.1, 0.5, 1.95), M.gHair); back.position.copy(HEAD_C).add(new V3(0, 0.02, -0.03)); gHead.add(back); outline(back, 1.02);
+    // fringe: flat pointed strands hanging from the hairline, longer and sweeping over on her left side
+    var n = 11;
+    for (var i = 0; i < n; i++) {
+      var u = i / (n - 1), phi = Math.PI / 2 + (u - 0.5) * 1.95;
+      var len = 0.55 + 0.5 * Math.max(0, u - 0.55) / 0.45 + 0.08 * Math.sin(i * 2.3), th0 = 1.0 + Math.abs(u - 0.5) * 0.22;
+      var p0 = headPoint(th0, phi, 1.08), p1 = headPoint(th0 + 0.05, phi, 1.08);
+      var down = p1.clone().sub(p0).normalize(), nrm = p0.clone().sub(HEAD_C).normalize();
+      var sweep = (u - 0.35) * 0.5;                                          // combed over towards her left
+      down.applyAxisAngle(nrm, sweep).normalize();
+      var sg = new THREE.ConeGeometry(0.17 + 0.03 * Math.sin(i * 1.7), len, 8, 1); sg.scale(1, 1, 0.35); sg.rotateX(Math.PI);   // tip down (-y)
+      var s = mesh(sg, M.gHair);
+      var xAx = new V3().crossVectors(down.clone().negate(), nrm).normalize();
+      s.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAx, down.clone().negate(), new V3().crossVectors(xAx, down.clone().negate())));
+      s.position.copy(p0).addScaledVector(down, len / 2).addScaledVector(nrm, 0.02);
+      gHead.add(s); outline(s, 1.06);
+    }
+    // locks framing the face, down past the collarbones
+    [-1, 1].forEach(function (s) {
+      var lg = new THREE.CylinderGeometry(0.15, 0.035, 3.2, 10, 6); lg.scale(1, 1, 0.55);
+      var lp = lg.attributes.position, v = new V3();
+      for (var j = 0; j < lp.count; j++) { v.set(lp.getX(j), lp.getY(j), lp.getZ(j)); var d = (1.6 - v.y) / 3.2; v.x += s * 0.18 * d * d - s * 0.05 * Math.sin(d * Math.PI); v.z += 0.2 * d; lp.setXYZ(j, v.x, v.y, v.z); }
+      lg.computeVertexNormals();
+      var lock = mesh(lg, M.gHair); lock.position.set(0.76 * s, HEAD_C.y - 1.3, HEAD_C.z + 0.22); lock.rotation.z = -0.05 * s; gHead.add(lock); outline(lock, 1.05);
+      var tip = mesh(new THREE.ConeGeometry(0.06, 0.35, 6), M.gHairTip); tip.rotation.x = Math.PI; tip.position.set(0.76 * s + s * 0.18, HEAD_C.y - 3.05, HEAD_C.z + 0.44); gHead.add(tip);
+    });
+    // a black ribbon clip above her right ear
+    var bow = new THREE.Group(); bow.position.copy(headPoint(0.95, Math.PI / 2 - 1.15, 1.1)); gHead.add(bow);
+    [-1, 1].forEach(function (s) { var w = mesh(new THREE.ConeGeometry(0.16, 0.3, 4), M.gBlack); w.rotation.z = s * Math.PI / 2; w.position.x = s * 0.15; w.scale.z = 0.4; bow.add(w); });
+    bow.rotation.set(0, -1.1, 0.3);
+    // halo
+    var halo = mesh(new THREE.TorusGeometry(0.62, 0.03, 8, 48), M.gGlowPink, false);
+    halo.position.set(0, HEAD_C.y + 1.25, HEAD_C.z - 0.35); halo.rotation.set(Math.PI / 2 - 0.35, 0.12, 0); gHead.add(halo);
+    // the long fall down her back: an open sheet from the nape to below the bar, cut into points at the ends
+    var hg = new THREE.CylinderGeometry(0.8, 1.5, 5.0, 40, 10, true, Math.PI / 2 + 0.6, Math.PI - 1.2);
     var hp = hg.attributes.position, hv = new V3();
-    for (var hi = 0; hi < hp.count; hi++) {
-      hv.set(hp.getX(hi), hp.getY(hi), hp.getZ(hi));
-      var down = (0.95 - hv.y) / 1.9;                                         // 0 at the crown line, 1 at the tips
-      var ang = Math.atan2(hv.x, hv.z);
-      if (down > 0.99) hv.y -= 0.22 * Math.abs(Math.sin(ang * 5.5));        // pointed tips
-      hv.x *= HEAD_SCALE.x; hv.z *= HEAD_SCALE.z * (1 - 0.12 * down);        // lies closer to the back lower down
-      hp.setXYZ(hi, hv.x, hv.y, hv.z);
+    for (var k = 0; k < hp.count; k++) {
+      hv.set(hp.getX(k), hp.getY(k), hp.getZ(k));
+      if (hv.y < -2.49) hv.y -= 0.45 * Math.abs(Math.sin(Math.atan2(hv.x, hv.z) * 7));
+      hv.x *= 1.1; hv.z *= 0.75;
+      hp.setXYZ(k, hv.x, hv.y, hv.z);
     }
     hg.computeVertexNormals();
-    var backLong = mesh(hg, M.gHair); backLong.position.set(0, -0.95, -0.02); gHeadS.add(backLong); outline(backLong, 1.02);
-    for (var i = -3; i <= 3; i++) {
-      var phi = Math.PI / 2 + i * 0.26, th = 1.12, r = 0.9;
-      var n = new V3(-Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th));
-      var strand = mesh(new THREE.SphereGeometry(1, 14, 10), M.gHair);
-      strand.scale.set(0.17 - Math.abs(i) * 0.012, 0.3 - Math.abs(i) * 0.02, 0.07);
-      strand.position.set(n.x * r * HEAD_SCALE.x, n.y * r * HEAD_SCALE.y - 0.02, n.z * r * HEAD_SCALE.z);
-      strand.quaternion.setFromUnitVectors(new V3(0, 0, 1), n);
-      strand.rotateZ(i * 0.14);
-      gHeadS.add(strand);
-    }
-    [-1, 1].forEach(function (s) {
-      var lock = mesh(new THREE.CylinderGeometry(0.16, 0.12, 1.15, 12), M.gHair); lock.scale.z = 0.6; lock.position.set(0.76 * s, -0.55, 0.22); lock.rotation.z = 0.06 * s; gHeadS.add(lock); outline(lock, 1.06);
-      var tip = mesh(new THREE.SphereGeometry(0.12, 10, 8), M.gHairTip); tip.scale.set(1, 1.3, 0.6); tip.position.set(0.79 * s, -1.15, 0.22); gHeadS.add(tip);
-      var bun = mesh(new THREE.SphereGeometry(0.3, 16, 12), M.gHair); bun.position.set(0.55 * s, 0.75, -0.2); gHeadS.add(bun); outline(bun, 1.07);
-      var tie = mesh(new THREE.TorusGeometry(0.2, 0.03, 8, 20), M.gGlowCyan, false); tie.position.set(0.47 * s, 0.63, -0.16); tie.rotation.set(0.9, 0, 0.6 * s); gHeadS.add(tie);
-    });
-    var clip = mesh(new THREE.BoxGeometry(0.22, 0.05, 0.05), M.gGlowPink, false); clip.position.set(-0.5, 0.52, 0.62); clip.rotation.z = 0.5; gHeadS.add(clip);
+    var fall = mesh(hg, M.gHair); fall.position.set(0, 4.5, -0.12); gTorso.add(fall); outline(fall, 1.015);
   })();
 
-  // arms (drawn between shoulder, elbow and hand each frame)
-  // sleeves taper from the shoulder to a loose cuff; the unit segments are stretched to length each frame
-  var upperGeo = new THREE.CylinderGeometry(0.165, 0.2, 1, 14), foreGeo = new THREE.CylinderGeometry(0.14, 0.165, 1, 14);
+  // arms, drawn between shoulder, elbow and wrist each frame; long black sleeves ending in a pink trim
+  var upperGeo = new THREE.CylinderGeometry(0.34, 0.42, 1, 16), foreGeo = new THREE.CylinderGeometry(0.27, 0.34, 1, 16);
   function makeHand(side) {                                                 // local: +y along the fingers, +z the back of the hand
     var g = new THREE.Group(), ts = side === "R" ? -1 : 1;                 // thumb towards her middle
-    var palm = mesh(new THREE.SphereGeometry(0.12, 14, 10), M.gSkin); palm.scale.set(0.95, 1.05, 0.5); palm.position.y = 0.07; g.add(palm); outline(palm, 1.08);
+    var palm = mesh(new THREE.SphereGeometry(0.42, 16, 12), M.gSkin); palm.scale.set(0.9, 1.1, 0.4); palm.position.y = 0.42; g.add(palm); outline(palm, 1.05);
     for (var i = 0; i < 4; i++) {
-      var f = new THREE.Group(); f.position.set((i - 1.5) * 0.052 * -ts, 0.17 - Math.abs(i - 1.2) * 0.012, 0); f.rotation.x = -0.45 - i * 0.06;
-      var fm = mesh(new THREE.CapsuleGeometry(0.029, 0.09 - Math.abs(i - 1.3) * 0.015, 4, 8), M.gSkin); fm.position.y = 0.06; f.add(fm); outline(fm, 1.1);
+      var f = new THREE.Group(); f.position.set((i - 1.5) * 0.19 * -ts, 0.84 - Math.abs(i - 1.2) * 0.05, 0); f.rotation.x = -0.3 - i * 0.06;
+      var fm = mesh(new THREE.CapsuleGeometry(0.075, 0.46 - Math.abs(i - 1.3) * 0.08, 4, 8), M.gSkin); fm.position.y = 0.26; f.add(fm); outline(fm, 1.08);
+      var nail = mesh(new THREE.SphereGeometry(0.06, 8, 6), M.gTrim, false); nail.scale.set(1, 1.3, 0.4); nail.position.set(0, 0.5 - Math.abs(i - 1.3) * 0.08, 0.05); f.add(nail);
       g.add(f);
     }
-    var th = new THREE.Group(); th.position.set(ts * 0.085, 0.03, -0.02); th.rotation.set(-0.35, 0, -ts * 0.75);
-    var tm = mesh(new THREE.CapsuleGeometry(0.032, 0.08, 4, 8), M.gSkin); tm.position.y = 0.06; th.add(tm); outline(tm, 1.1);
+    var th = new THREE.Group(); th.position.set(ts * 0.3, 0.28, -0.06); th.rotation.set(-0.35, 0, -ts * 0.7);
+    var tm = mesh(new THREE.CapsuleGeometry(0.085, 0.36, 4, 8), M.gSkin); tm.position.y = 0.24; th.add(tm); outline(tm, 1.08);
     g.add(th);
     return g;
   }
   function makeArm(side) {
     var a = {
       upper: mesh(upperGeo, M.gJacket), fore: mesh(foreGeo, M.gJacket),
-      elbow: mesh(new THREE.SphereGeometry(0.165, 12, 10), M.gJacket),
-      cuff: mesh(new THREE.TorusGeometry(0.14, 0.022, 6, 18), M.gGlowCyan, false),
+      elbow: mesh(new THREE.SphereGeometry(0.34, 14, 10), M.gJacket),
+      cuff: mesh(new THREE.TorusGeometry(0.28, 0.035, 6, 20), M.gTrim, false),
       hand: makeHand(side),
       anchor: new THREE.Object3D()
     };
     a.parts = [a.upper, a.fore, a.elbow, a.cuff, a.hand];
     a.parts.forEach(function (m) { m.userData.pick = "girl"; scene.add(m); });
-    [a.upper, a.fore].forEach(function (m) { outline(m, 1.1).scale.set(1.1, 1.0, 1.1); });
-    outline(a.elbow, 1.09);
+    [a.upper, a.fore].forEach(function (m) { outline(m, 1.06).scale.set(1.06, 1.0, 1.06); });
+    outline(a.elbow, 1.05);
     scene.add(a.anchor);
     return a;
   }
@@ -3767,7 +3789,7 @@ function photoTex(name, srgb, rx, ry) {
     m.quaternion.setFromUnitVectors(Y_AXIS, d.normalize());
     m.scale.set(1, len, 1);
   }
-  var SHOULDER = { R: new V3(-0.92, 2.22, 0), L: new V3(0.92, 2.22, 0) };
+  var SHOULDER = { R: new V3(-1.45, 5.3, 0), L: new V3(1.45, 5.3, 0) };
   var _hx = new V3(), _hz = new V3(), _hm = new THREE.Matrix4();
   function updateArm(arm, side, P) {
     var S = gTorso.localToWorld(SHOULDER[side].clone());
@@ -3777,14 +3799,14 @@ function photoTex(name, srgb, rx, ry) {
     setSeg(arm.fore, E, H);
     arm.elbow.position.copy(E);
     var fd = H.clone().sub(E).normalize();
-    arm.cuff.position.copy(H).sub(fd.clone().multiplyScalar(0.06));
+    arm.cuff.position.copy(H).sub(fd.clone().multiplyScalar(0.08));
     arm.cuff.quaternion.setFromUnitVectors(new V3(0, 0, 1), fd);
     // the hand carries on from the forearm, back of the hand up (or towards us when the forearm points up)
     _hz.set(0, 1, 0).addScaledVector(fd, -fd.y);
     if (_hz.lengthSq() < 0.04) _hz.set(0, 0, 1).addScaledVector(fd, -fd.z);
     _hz.normalize(); _hx.crossVectors(fd, _hz);
     arm.hand.quaternion.setFromRotationMatrix(_hm.makeBasis(_hx, fd, _hz));
-    arm.hand.position.copy(H).addScaledVector(fd, -0.02);
+    arm.hand.position.copy(H).addScaledVector(fd, -0.05);
     arm.anchor.position.copy(H);
   }
 
@@ -3794,14 +3816,18 @@ function photoTex(name, srgb, rx, ry) {
       hR: o.hR.clone(), eR: o.eR.clone(), hL: o.hL.clone(), eL: o.eL.clone()
     };
   }
+  // poses in her root space: the bar top is y 0, its far edge z 1.4; shoulders sit near (+-1.45, 2.3, 0.3)
   var POSE = {
-    // forearms on the bar, hands resting palm down a few cm in from its edge (the edge is at z 1.1 here, the top at y 0)
-    rest: GP({ lean: 0.1, tilt: 0.1, nod: 0.05, hR: new V3(-0.42, 0.11, 1.8), eR: new V3(-1.05, 0.2, 0.8), hL: new V3(0.42, 0.11, 1.8), eL: new V3(1.05, 0.2, 0.8) }),
+    // forearms on the bar, hands resting palm down
+    rest: GP({ lean: 0.06, tilt: 0.08, nod: 0.05, hR: new V3(-0.55, 0.22, 3.3), eR: new V3(-2.0, 0.32, 1.55), hL: new V3(0.55, 0.22, 3.3), eL: new V3(2.0, 0.32, 1.55) }),
     // leaning in on folded arms, the left forearm over the right
-    fold: GP({ lean: 0.3, tilt: 0.2, nod: 0.12, hR: new V3(0.3, 0.14, 1.95), eR: new V3(-0.85, 0.22, 1.5), hL: new V3(-0.3, 0.4, 1.8), eL: new V3(0.85, 0.4, 1.4) }),
-    clasp: GP({ lean: 0.24, tilt: 0.24, nod: -0.32, hR: new V3(-0.14, 2.05, 1.5), eR: new V3(-0.85, 0.25, 1.4), hL: new V3(0.14, 2.05, 1.5), eL: new V3(0.85, 0.25, 1.4) }),
-    smoke: GP({ lean: 0.08, tilt: -0.1, nod: 0.02, hR: new V3(-0.85, 1.9, 1.05), eR: new V3(-1.15, 0.25, 1.15), hL: new V3(0.42, 0.11, 1.8), eL: new V3(1.05, 0.2, 0.8) })
+    fold: GP({ lean: 0.16, tilt: 0.18, nod: 0.1, hR: new V3(0.55, 0.35, 3.1), eR: new V3(-1.75, 0.35, 2.1), hL: new V3(-0.55, 0.7, 2.9), eL: new V3(1.75, 0.62, 1.9) }),
+    // hands together under the chin: please?
+    clasp: GP({ lean: 0.12, tilt: 0.2, nod: -0.2, hR: new V3(-0.2, 2.8, 2.35), eR: new V3(-1.4, 0.4, 2.1), hL: new V3(0.2, 2.8, 2.35), eL: new V3(1.4, 0.4, 2.1) }),
+    // cigarette held up beside her face, elbow on the bar
+    smoke: GP({ lean: 0.06, tilt: -0.08, nod: 0.02, hR: new V3(-1.35, 2.5, 2.35), eR: new V3(-1.75, 0.4, 2.0), hL: new V3(0.55, 0.22, 3.3), eL: new V3(2.0, 0.32, 1.55) })
   };
+  var PUFF_ER = new V3(-1.3, 1.2, 1.9);                                     // elbow lifted off the bar to bring the hand to her lips
   function poseWith(base, changes) {
     var p = GP(base);
     for (var k in changes) p[k] = changes[k].clone ? changes[k].clone() : changes[k];
@@ -3810,6 +3836,7 @@ function photoTex(name, srgb, rx, ry) {
   girl.pose = GP(POSE.rest);
   function moveGirl(target, dur, extra) {
     var from = GP(girl.pose);
+    if (girl.ph && girl.ph.k >= 1) target = poseWith(target, { hL: PH_HL, eL: PH_EL });   // her phone hand stays on the phone
     return tween(dur, function (k) {
       var e = ease(k);
       girl.pose.lean = from.lean + (target.lean - from.lean) * e;
@@ -3819,21 +3846,96 @@ function photoTex(name, srgb, rx, ry) {
       if (extra) extra(e, k);
     });
   }
-  var MOUTH = new V3(0, -0.44 * HEAD_K + 0.12, 0.66 * HEAD_K);
-  var MOUTH_Q = new Q().setFromUnitVectors(X_AXIS, new V3(0.22, -0.2, 1).normalize());
-  var G_HOLD_OFF = new V3(0.03, 0.1, 0.07);
+  var MOUTH = headPoint(FACE_TH0 + FACE_TH * (184 / 256), Math.PI / 2, 1.0).add(new V3(0, 0, -0.04));
+  var MOUTH_Q = new Q().setFromUnitVectors(X_AXIS, new V3(0.22, -0.25, 1).normalize());
+  var G_HOLD_OFF = new V3(0.1, 1.0, 0.25);
   var G_HOLD_Q = new Q().setFromUnitVectors(X_AXIS, new V3(0.45, 0.6, 0.6).normalize());
   function mouthInGirl() { girl.root.updateMatrixWorld(true); return girl.root.worldToLocal(gHead.localToWorld(MOUTH.clone())); }
   function mouthWorld() { return gHead.localToWorld(MOUTH.clone()); }
-  function girlHeadTop() { return gHead.localToWorld(new V3(0, 1.55, 0)); }
+  function girlHeadTop() { return gHead.localToWorld(new V3(0, HEAD_C.y + 1.9, 0)); }
 
   // her little ashtray
   var gTray = new THREE.Group();
-  gTray.position.set(-1.85, 0, -2.35);                                      // on the bar by her right hand
+  gTray.position.set(-2.4, 0, -2.2);                                        // on the bar by her right hand
   scene.add(gTray);
   var gTrayMesh = mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.14, 6), M.tray); gTrayMesh.position.y = 0.07; gTray.add(gTrayMesh);
   var gTrayRim = mesh(new THREE.TorusGeometry(0.42, 0.02, 6, 6), M.gGlowPink, false); gTrayRim.rotation.x = Math.PI / 2; gTrayRim.position.y = 0.145; gTray.add(gTrayRim);
   var gButts = 0;
+
+  // her phone: lies face down on the bar by her left hand; picked up, it sits in her palm facing her and plays its own feed
+  var PH_HL = new V3(0.4, 2.65, 2.6), PH_EL = new V3(1.55, 0.45, 2.0);    // the hand holding it up in front of her chest
+  var gPhone = new THREE.Group(); scene.add(gPhone);
+  (function () {
+    gPhone.add(mesh(new RoundedBoxGeometry(PHONE_W, PHONE_H, PHONE_D, 4, 0.075), new THREE.MeshStandardMaterial({ color: 0xf2a6c6, roughness: 0.45, metalness: 0.1 })));
+    var bump = mesh(new RoundedBoxGeometry(0.3, 0.3, 0.03, 3, 0.07), new THREE.MeshStandardMaterial({ color: 0x1a1a1e, roughness: 0.3 }));
+    bump.position.set(-0.16, 0.54, -PHONE_D / 2 - 0.012); gPhone.add(bump);
+  })();
+  var gScrCanvas = document.createElement("canvas"); gScrCanvas.width = SCR_W; gScrCanvas.height = SCR_H;
+  var gScr = gScrCanvas.getContext("2d");
+  var gScrTex = new THREE.CanvasTexture(gScrCanvas); gScrTex.colorSpace = THREE.SRGBColorSpace;
+  var gScrMesh = new THREE.Mesh(new THREE.PlaneGeometry(PHONE_W - 0.05, PHONE_H - 0.055), new THREE.MeshBasicMaterial({ map: gScrTex, color: new THREE.Color(0.95, 0.95, 0.95) }));
+  gScrMesh.position.z = PHONE_D / 2 + 0.002; gPhone.add(gScrMesh);
+  var gPhoneLight = new THREE.PointLight(0xffc6e0, 0, 3.0, 1.5); gPhoneLight.position.set(0, 0, 0.8); gPhone.add(gPhoneLight);   // lights her face
+  var G_PHONE_HOME = { pos: new V3(1.9, PHONE_D / 2 + 0.004, -2.2), quat: new Q().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0.35)) };   // face down
+  gPhone.position.copy(G_PHONE_HOME.pos); gPhone.quaternion.copy(G_PHONE_HOME.quat);
+  girl.ph = { k: 0, busy: false, next: 12, until: 0, feed: { order: [], pos: 0, vt: 0, swipe: -1, len: 4, liked: false }, drawAt: 0, glanceAt: 0, glanceUntil: 0 };
+  function herClip(k) {
+    var f = girl.ph.feed;
+    while (f.order.length <= k) FEED.map(function (_, i) { return i; }).sort(function () { return Math.random() - 0.5; })
+      .forEach(function (i) { f.order.push({ v: FEED[i], likes: Math.floor(rand(2000, 260000)), com: Math.floor(rand(80, 9000)), share: Math.floor(rand(20, 4000)), seed: Math.random() * 100 }); });
+    return f.order[k];
+  }
+  function drawHerScreen() {
+    var g = gScr, W = SCR_W, H = SCR_H, f = girl.ph.feed;
+    var cur = herClip(f.pos), sw = f.swipe < 0 ? 0 : ease(Math.min(1, f.swipe)), off = -sw * H;
+    g.save(); g.translate(0, off); drawClip(g, cur, f.vt, W, H); drawChrome(g, cur, f.vt, W, H, f.liked, f.liked ? 1 : 0); g.restore();
+    if (sw > 0) { var nx = herClip(f.pos + 1); g.save(); g.translate(0, off + H); drawClip(g, nx, 0, W, H); drawChrome(g, nx, 0, W, H, false, 0); g.restore(); }
+    g.fillStyle = "#000"; g.fillRect(0, H - 48, W, 48);
+    gScrTex.needsUpdate = true;
+  }
+  var _gpA = new V3(), _gpQ = new Q(), _gpM = new THREE.Matrix4(), _gpH = new V3();
+  function updateHerPhone(t, dt) {
+    var ph = girl.ph, f = ph.feed, k = ph.k;
+    if (k > 0) {
+      // in her palm, screen turned up to her face
+      armL.hand.updateMatrixWorld(true);
+      armL.hand.localToWorld(_gpA.set(0, 0.8, -0.35));
+      _gpH.copy(gHead.localToWorld(HEAD_C.clone()));
+      _gpM.lookAt(_gpH, _gpA, Y_AXIS); _gpQ.setFromRotationMatrix(_gpM);     // +z of the phone towards her eyes
+      var e = ease(k);
+      gPhone.position.lerpVectors(G_PHONE_HOME.pos, _gpA, e);
+      gPhone.quaternion.copy(G_PHONE_HOME.quat).slerp(_gpQ, e);
+      if (k >= 1) {                                                         // thumbing through clips
+        f.vt += dt;
+        if (f.swipe >= 0) { f.swipe += dt / 0.5; if (f.swipe >= 1) { f.pos++; f.swipe = -1; f.vt = 0; f.len = rand(2.5, 6); f.liked = false;
+          if (Math.random() < 0.3) setTempExpr(pick(["happy", "wink"]), 1.3);
+          if (Math.random() < 0.08) showBubble(pick(["哈哈哈哈", "这个好好笑", "你看这个～"]), 1.8); } }
+        else if (f.vt > f.len) f.swipe = 0;
+        else if (!f.liked && f.vt > 1.2 && Math.random() < dt * 0.1) f.liked = true;
+      }
+      if (t > ph.drawAt) { drawHerScreen(); ph.drawAt = t + 0.12; }
+    } else { gPhone.position.copy(G_PHONE_HOME.pos); gPhone.quaternion.copy(G_PHONE_HOME.quat); }
+    gPhoneLight.intensity = girlOn ? 0.55 * k : 0;
+  }
+  // picking it up: hand over to it, then up in front of her; putting it down is the same backwards
+  async function girlPhone(up, inner) {
+    var ph = girl.ph;
+    if (!inner) { girl.anim = true; renderUI(); }
+    var overL = girl.root.worldToLocal(G_PHONE_HOME.pos.clone()).add(new V3(-0.2, 0.3, -0.2)), overE = new V3(2.3, 0.4, 0.9);
+    ph.k = Math.min(ph.k, 0.999);                                          // let moveGirl steer the left hand again
+    if (up) {
+      await moveGirl(poseWith(girl.pose, { hL: overL, eL: overE }), 0.5);
+      ph.feed.vt = 0; ph.feed.swipe = -1;
+      await moveGirl(poseWith(girl.pose, { hL: PH_HL, eL: PH_EL, nod: girl.pose.nod + 0.05 }), 0.8, function (e) { ph.k = e * 0.999; });
+      ph.k = 1; ph.until = nowT + rand(14, 26);
+    } else {
+      await moveGirl(poseWith(girl.pose, { hL: overL, eL: overE }), 0.8, function (e) { ph.k = 0.999 * (1 - e); });
+      ph.k = 0;
+      await moveGirl(poseWith(girl.pose, { hL: POSE.rest.hL, eL: POSE.rest.eL }), 0.5);
+      ph.next = nowT + rand(12, 25);
+    }
+    if (!inner) { girl.anim = false; renderUI(); }
+  }
 
   function exprNow(t) {
     var e = (girl.tempExpr && t < girl.tempUntil) ? girl.tempExpr : girl.baseExpr;
@@ -3849,9 +3951,15 @@ function photoTex(name, srgb, rx, ry) {
   var _gzW = new V3(), _gzL = new V3();
   function girlLookTarget(t) {
     var g = girl.gaze;
+    g.down = false;
     if (girl.state === "waiting") { g.at = null; return camera.getWorldPosition(_gzW); }   // pleading: eyes on you
     if (busy && (state.holding || leftClaims > 0)) {                       // you're doing something: she watches your hands
       return state.holding && !leftClaims ? right.root.getWorldPosition(_gzW) : left.root.getWorldPosition(_gzW);
+    }
+    if (girl.ph.k > 0.9) {                                                  // scrolling: eyes on the screen, now and then up at you
+      if (t > girl.ph.glanceAt) { girl.ph.glanceUntil = t + rand(0.9, 1.6); girl.ph.glanceAt = t + rand(5, 11); }
+      g.down = t >= girl.ph.glanceUntil;
+      return g.down ? gPhone.getWorldPosition(_gzW) : camera.getWorldPosition(_gzW);
     }
     if (g.at && t > g.until) g.at = null;
     if (!g.at && t > g.next) {
@@ -3866,12 +3974,12 @@ function photoTex(name, srgb, rx, ry) {
   }
   function updateGirl(t, dt) {
     gPivot.rotation.x = girl.pose.lean;
-    gTorso.scale.y = 1 + Math.sin(t * 1.6) * 0.008;                       // breathing
+    gTorso.scale.y = 1 + Math.sin(t * 1.6) * 0.003;                       // breathing
     girl.root.updateMatrixWorld(true);
     if (!(girl.anim && girl.state !== "none")) {                           // hold still while a cigarette is at her lips
       _gzL.copy(girlLookTarget(t)); gTorso.worldToLocal(_gzL).sub(gHead.position);
       var wy = THREE.MathUtils.clamp(Math.atan2(_gzL.x, _gzL.z), -0.55, 0.55);
-      var wp = THREE.MathUtils.clamp(-Math.atan2(_gzL.y, Math.hypot(_gzL.x, _gzL.z)), -0.45, 0.18);   // glances down stay small
+      var wp = THREE.MathUtils.clamp(-Math.atan2(_gzL.y, Math.hypot(_gzL.x, _gzL.z)), -0.45, girl.gaze.down ? 0.6 : 0.18);   // glances down stay small; reading her phone she looks right down
       var k = Math.min(1, dt * 4);
       girl.gaze.yaw += (wy - girl.gaze.yaw) * k; girl.gaze.pitch += (wp - girl.gaze.pitch) * k;
     }
@@ -3879,19 +3987,22 @@ function photoTex(name, srgb, rx, ry) {
     girl.root.updateMatrixWorld(true);
     updateArm(armR, "R", girl.pose);
     updateArm(armL, "L", girl.pose);
+    updateHerPhone(t, dt);
     if (t > girl.blinkAt) { girl.blinkUntil = t + 0.13; girl.blinkAt = t + rand(2.5, 5); }
     var fe = exprNow(t);
     if (fe !== lastFace) { faceMat.map = girl.face[fe]; lastFace = fe; }
     if (girl.queued && !girl.anim) toggleGirl();
     else if (girl.state === "smoking" && !girl.anim && t > girl.nextPuff) girlPuff();
-    else if (girl.state === "none" && !girl.anim && !busy && t > girl.idleNext) girlShift();
+    else if (girl.state !== "waiting" && !girl.anim && !busy && girl.ph.k === 0 && t > girl.ph.next) girlPhone(true);
+    else if (girl.ph.k >= 1 && !girl.anim && !busy && t > girl.ph.until) girlPhone(false);
+    else if (girl.state === "none" && !girl.anim && !busy && girl.ph.k === 0 && t > girl.idleNext) girlShift();
   }
   // with nothing to smoke she shifts about now and then: forearms on the bar, or leaning in on folded arms
   async function girlShift() {
     girl.anim = true; renderUI();
     await moveGirl(girl.pose.lean < 0.2 ? POSE.fold : POSE.rest, 1.3);
     if (Math.random() < 0.35) setTempExpr(pick(["happy", "wink"]), 1.4);
-    girl.idleNext = clock.elapsedTime + rand(10, 18);
+    girl.idleNext = nowT + rand(10, 18);
     girl.anim = false; renderUI();
   }
   function girlSays(p, lines, expr) {                                      // an occasional remark about what you're doing
@@ -5180,30 +5291,31 @@ function photoTex(name, srgb, rx, ry) {
   async function doGive() {
     if (busy || girl.anim || girl.state !== "none") return;
     lock(); girl.anim = true;
+    if (girl.ph.k > 0) await girlPhone(false, true);
     setTempExpr("happy", 1.2);
     lookToward(0.3, -0.05);
     await pullFromPack(left, grabQL, pinchAnchorL, gc);
     lookToward(0, 0.12);
     showBubble("给我的吗？", 2.2);
-    var meetW = new V3(-0.45, 1.6, -2.7);
+    var meetW = new V3(-0.75, 0.95, -2.25);                                  // low over the bar: an arm raised to eye height fills the view
     var cp0 = gc.group.position.clone(), cq0 = gc.group.quaternion.clone();
     await Promise.all([
       moveHand(left, { pos: posFor(meetW, offerQ, pinchAnchorL), quat: offerQ, f: FP.pinch }, 0.8, function (e) {
         gc.group.position.lerpVectors(cp0, pinchCigPosL, e);
         gc.group.quaternion.copy(cq0).slerp(pinchCigQ, e);
       }),
-      wait(0.3).then(function () { return moveGirl(poseWith(girl.pose, { lean: 0.22, tilt: 0.12 }), 0.5); })
+      wait(0.3).then(function () { return moveGirl(poseWith(girl.pose, { lean: 0.14, tilt: 0.12 }), 0.5); })
     ]);
     left.root.updateMatrixWorld(true);
     var midW = gc.group.localToWorld(new V3(0.5, 0, 0));
-    await moveGirl(poseWith(girl.pose, { hR: girl.root.worldToLocal(midW.clone()).add(new V3(0, -0.06, -0.04)), eR: new V3(-0.95, 0.9, 1.5) }), 0.55);
+    await moveGirl(poseWith(girl.pose, { hR: girl.root.worldToLocal(midW.clone()).add(new V3(0, -0.06, -0.04)), eR: new V3(-2.0, 0.45, 0.6) }), 0.55);
     armR.anchor.updateMatrixWorld(true);
     armR.anchor.attach(gc.group);
     await Promise.all([
       moveHand(left, leftIdle, 0.7),
       (async function () {
-        var near = mouthInGirl().add(new V3(-0.15, -0.12, 0.3));
-        await moveGirl(poseWith(girl.pose, { hR: near, eR: new V3(-1.0, 0.4, 1.2), lean: 0.12, tilt: 0.05 }), 0.6);
+        var near = mouthInGirl().add(new V3(-0.3, -0.3, 0.5));
+        await moveGirl(poseWith(girl.pose, { hR: near, eR: new V3(-1.4, 1.1, 2.2), lean: 0.12, tilt: 0.05 }), 0.6);
         gHead.attach(gc.group);
         var p0 = gc.group.position.clone(), q0 = gc.group.quaternion.clone();
         await tween(0.35, function (k) { var e = ease(k); gc.group.position.lerpVectors(p0, MOUTH, e); gc.group.quaternion.copy(q0).slerp(MOUTH_Q, e); });
@@ -5225,14 +5337,17 @@ function photoTex(name, srgb, rx, ry) {
     lock(); girl.anim = true;
     hideBubble();
     girl.baseExpr = "puff";
-    lookToward(0, 0.12);
+    lookToward(0, 0.02);
+    // she leans across into the light, so the lighter meets the tip low over the bar
+    await moveGirl(poseWith(POSE.rest, { lean: 0.3, nod: 0.32, tilt: 0.05 }), 0.6);
     await flameAt(gc.tipWorld(), gc);
     await Promise.all([
       moveHand(left, leftIdle, 0.6).then(function () { lighter.visible = false; }),
       (async function () {
-        await wait(0.25);
+        await wait(0.1);
+        await moveGirl(poseWith(girl.pose, { lean: 0.1, nod: 0.05, tilt: 0.1 }), 0.5);   // sits back, drawing
         var hp = mouthInGirl().sub(G_HOLD_OFF);
-        await moveGirl(poseWith(girl.pose, { hR: hp, eR: new V3(-1.05, 0.35, 1.3), hL: POSE.rest.hL, eL: POSE.rest.eL, lean: 0.1 }), 0.55);
+        await moveGirl(poseWith(girl.pose, { hR: hp, eR: PUFF_ER, hL: POSE.rest.hL, eL: POSE.rest.eL }), 0.55);
         armR.anchor.updateMatrixWorld(true);
         armR.anchor.attach(gc.group);
         var p0 = gc.group.position.clone(), q0 = gc.group.quaternion.clone();
@@ -5260,7 +5375,7 @@ function photoTex(name, srgb, rx, ry) {
 
   async function girlPuff() {
     girl.anim = true; renderUI();
-    await moveGirl(poseWith(POSE.smoke, { hR: mouthInGirl().sub(G_HOLD_OFF), eR: new V3(-1.05, 0.35, 1.3), tilt: -0.02 }), 0.7);
+    await moveGirl(poseWith(POSE.smoke, { hR: mouthInGirl().sub(G_HOLD_OFF), eR: PUFF_ER, tilt: -0.02 }), 0.7);
     girl.baseExpr = "puff";
     var b0 = gc.bodyLen, a0 = gc.ash, burn = Math.min(PUFF_BURN, b0);
     await tween(0.9, function (k) {
@@ -5283,7 +5398,7 @@ function photoTex(name, srgb, rx, ry) {
     var above = girl.root.worldToLocal(gTray.localToWorld(new V3(0, 0.75, 0)));
     var p0 = gc.group.position.clone(), q0 = gc.group.quaternion.clone();
     var downQ = new Q().setFromUnitVectors(X_AXIS, new V3(0.1, -1, 0.1).normalize());
-    await moveGirl(poseWith(POSE.rest, { hR: above, eR: new V3(-1.3, 0.3, 1.0) }), 0.7, function (e) {
+    await moveGirl(poseWith(POSE.rest, { hR: above, eR: new V3(-2.7, 0.5, 0.2) }), 0.7, function (e) {
       gc.group.quaternion.copy(q0).slerp(downQ, e);
       gc.group.position.lerpVectors(p0, new V3(0, 0, 0), e);
     });
@@ -5308,7 +5423,7 @@ function photoTex(name, srgb, rx, ry) {
   // switching her on and off: she only goes (or comes) while nothing involving her is under way
   var btnGirlOn = document.getElementById("btnGirlOn");
   function applyGirl() {
-    girl.root.visible = girlOn; gTray.visible = girlOn;
+    girl.root.visible = girlOn; gTray.visible = girlOn; gPhone.visible = girlOn;
     [armR, armL].forEach(function (a) { a.parts.forEach(function (m) { m.visible = girlOn; }); });
     document.getElementById("girlCtrl").style.display = girlOn ? "" : "none";
     bubble.style.display = girlOn ? "" : "none";
@@ -5324,7 +5439,7 @@ function photoTex(name, srgb, rx, ry) {
       if (gc.group.parent !== scene) scene.attach(gc.group);
       gc.group.visible = false; gc.lit = false; gc.inhale = 0;
       girl.state = "none"; girl.baseExpr = "normal"; girl.tempExpr = null;
-      girl.pose = GP(POSE.rest);
+      girl.pose = GP(POSE.rest); girl.ph.k = 0; girl.ph.next = nowT + rand(8, 16);
       hideBubble();
     } else {
       girl.pose = GP(POSE.rest);
