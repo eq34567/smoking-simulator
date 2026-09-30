@@ -1,0 +1,8 @@
+# local tooling / editor
+.claude/
+
+# old snapshots of the page kept locally
+smoking-simulator.*.html
+
+# separate project with its own git repo
+experiment-001/
