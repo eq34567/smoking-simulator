@@ -1,10 +1,12 @@
 # 抽烟模拟器
 
+**▶ 在线玩：<https://eq34567.github.io/smoking-simulator/>**（电脑浏览器打开，首次加载贴图约 11 MB）
+
 第一人称的网页抽烟模拟器：吧台、烟盒、打火机、烟灰缸、手机，窗外是富士山夜景。three.js（r186）单文件实现，双手是蒙皮手模，由程序化关节驱动。
 
 > **目前只有网页版可以玩。虚幻引擎（Unreal Engine）版还没做**，只有一份计划和代码草稿，见文末[「虚幻展望」](#虚幻展望未完成)。
 
-## 运行
+## 本地运行
 
 浏览器不允许 `file://` 读取手模和贴图，需要本地起一个小服务器（需要 [Node.js](https://nodejs.org/)）：
 
@@ -34,6 +36,7 @@ node serve.js
 - `assets/hand/` — 左右手 GLB 模型
 - `assets/tex/` — 木纹、布料、皮革 PBR 贴图
 - `serve.js`、`启动网页版.bat` — 本地静态服务器
+- `index.html`、`.nojekyll` — GitHub Pages 入口（跳转到 `smoking-simulator.html`）
 - `虚幻展望.zip` — 虚幻引擎版的计划和代码草稿（C++、材质、场景脚本）。**未完成，还没在虚幻引擎里做出来**
 
 ---
